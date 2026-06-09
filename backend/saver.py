@@ -37,7 +37,10 @@ def detect_type_from_url(url):
         "github.com": "GitHub",
         "vimeo.com": "Video", "twitch.tv": "Video",
         "amazon.com": "Product", "amazon.co.uk": "Product",
-        "etsy.com": "Product", "zara.com": "Product", "hm.com": "Product",
+        "etsy.com": "Product",
+        "zara.com": "Product", "zarahome.com": "Product",
+        "hm.com": "Product", "hmhome.com": "Product",
+        "ikea.com": "Product", "zazzle.com": "Product",
     }
     for d, t in domain_types.items():
         if d in domain:
@@ -61,7 +64,7 @@ def init_db():
             created_at TEXT
         )
     """)
-    for col in ("content TEXT", "type TEXT", "images TEXT"):
+    for col in ("content TEXT", "type TEXT", "images TEXT", "price TEXT"):
         try:
             conn.execute(f"ALTER TABLE saves ADD COLUMN {col}")
         except Exception:
@@ -105,7 +108,9 @@ def detect_type(url, soup):
         "twitch.tv": "Video",
         "amazon.com": "Product", "amazon.co.uk": "Product",
         "etsy.com": "Product",
-        "zara.com": "Product", "hm.com": "Product",
+        "zara.com": "Product", "zarahome.com": "Product",
+        "hm.com": "Product", "hmhome.com": "Product",
+        "ikea.com": "Product", "zazzle.com": "Product",
     }
     for d, t in domain_types.items():
         if d in domain:
@@ -119,22 +124,31 @@ def detect_type(url, soup):
     if "product" in og_type:
         return "Product"
 
-    # recipe schema
+    # Open Graph product namespace (price tag = almost certainly a product page)
+    if soup.find("meta", property=lambda p: p and p.startswith("product:price")):
+        return "Product"
+
+    # Schema.org microdata
+    if soup.find(attrs={"itemtype": lambda x: x and "schema.org/Product" in x}):
+        return "Product"
     if soup.find(attrs={"itemtype": lambda x: x and "Recipe" in x}):
         return "Recipe"
-    if soup.find("script", attrs={"type": "application/ld+json"}):
-        for script in soup.find_all("script", attrs={"type": "application/ld+json"}):
-            try:
-                data = json.loads(script.string or "")
-                schema_type = data.get("@type", "") if isinstance(data, dict) else ""
+
+    # JSON-LD structured data
+    for script in soup.find_all("script", attrs={"type": "application/ld+json"}):
+        try:
+            data = json.loads(script.string or "")
+            items = data if isinstance(data, list) else [data]
+            for item in items:
+                schema_type = item.get("@type", "") if isinstance(item, dict) else ""
                 if "Recipe" in schema_type:
                     return "Recipe"
                 if "Product" in schema_type:
                     return "Product"
                 if "VideoObject" in schema_type:
                     return "Video"
-            except Exception:
-                pass
+        except Exception:
+            pass
 
     if "article" in og_type or "blog" in og_type:
         return "Article"
@@ -145,6 +159,12 @@ def detect_type(url, soup):
 def scrape(url):
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"}
     res = requests.get(url, headers=headers, timeout=10)
+
+    # Site blocked the scraper (bot detection, auth wall, etc.) — return empty so
+    # extension-provided metadata takes over in the caller
+    if res.status_code >= 400:
+        return {"title": "", "description": "", "image": "", "content": "", "type": detect_type_from_url(url), "price": ""}
+
     soup = BeautifulSoup(res.text, "html.parser")
 
     def meta(prop):
@@ -156,12 +176,39 @@ def scrape(url):
     image = meta("og:image")
     content_type = detect_type(url, soup)
 
+    # Price — Open Graph product namespace or JSON-LD offers
+    price = meta("product:price:amount") or meta("og:price:amount")
+    if not price:
+        for script in soup.find_all("script", attrs={"type": "application/ld+json"}):
+            try:
+                data = json.loads(script.string or "")
+                items = data if isinstance(data, list) else [data]
+                for item in items:
+                    offers = item.get("offers") if isinstance(item, dict) else None
+                    if isinstance(offers, dict):
+                        price = str(offers.get("price", "") or "")
+                        currency = offers.get("priceCurrency", "")
+                        if price:
+                            price = f"{currency}{price}" if currency else price
+                            break
+                    elif isinstance(offers, list) and offers:
+                        o = offers[0]
+                        price = str(o.get("price", "") or "")
+                        currency = o.get("priceCurrency", "")
+                        if price:
+                            price = f"{currency}{price}" if currency else price
+                            break
+            except Exception:
+                pass
+            if price:
+                break
+
     for tag in soup(["script", "style", "nav", "footer", "header", "aside"]):
         tag.decompose()
     raw_text = soup.get_text(separator=" ", strip=True)
     content = " ".join(raw_text.split())[:4000]
 
-    return {"title": title, "description": description, "image": image, "content": content, "type": content_type}
+    return {"title": title, "description": description, "image": image, "content": content, "type": content_type, "price": price}
 
 
 def get_tags(title, description):

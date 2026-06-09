@@ -7,7 +7,9 @@ const API = 'http://localhost:8000'
 const TYPE_ICONS = {
   YouTube: '▶',
   Instagram: '📷',
+  InstagramVideo: '▶',
   TikTok: '🎵',
+  TikTokSlideshow: '🎵',
   Pinterest: '📌',
   Twitter: '𝕏',
   Reddit: '💬',
@@ -17,6 +19,23 @@ const TYPE_ICONS = {
   Recipe: '🍳',
   Product: '🛍',
   Article: '📄',
+}
+
+const TYPE_LABELS = {
+  YouTube: 'YouTube',
+  Instagram: 'Instagram',
+  InstagramVideo: 'Instagram Reels',
+  TikTok: 'TikTok',
+  TikTokSlideshow: 'TikTok Slideshow',
+  Pinterest: 'Pinterest',
+  Twitter: 'Twitter',
+  Reddit: 'Reddit',
+  Spotify: 'Spotify',
+  GitHub: 'GitHub',
+  Video: 'Video',
+  Recipe: 'Recipe',
+  Product: 'Product',
+  Article: 'Article',
 }
 
 export default function App() {
@@ -171,7 +190,7 @@ export default function App() {
                 }`}
               >
                 <span>{TYPE_ICONS[type] || '🔗'}</span>
-                <span>{type}s</span>
+                <span>{TYPE_LABELS[type] || type}</span>
                 <span className={`text-[10px] ${activeType === type ? 'text-violet-200' : 'text-neutral-400'}`}>
                   {count}
                 </span>

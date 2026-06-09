@@ -12,14 +12,121 @@ let pageMetadata = {}
 async function extractMeta() {
   try {
     var host    = window.location.hostname
+    var _validUrl = function(u) { return u && u !== 'undefined' && u !== 'null' && (u.indexOf('http') === 0 || u.indexOf('data:') === 0) }
     var ogTitle = (document.querySelector('meta[property="og:title"]') || {}).content || document.title || ''
     var ogDesc  = (document.querySelector('meta[property="og:description"]') || {}).content || ''
-    var ogImage = (document.querySelector('meta[property="og:image"]') || {}).content || ''
+    var _rawOgImage = (document.querySelector('meta[property="og:image"]') || {}).content || ''
+    var ogImage = _validUrl(_rawOgImage) ? _rawOgImage : ''
 
     const allImgs = Array.from(document.querySelectorAll('img'))
     var _debug  = 'host:' + host + ' imgs:' + allImgs.length + ' ogimg:' + (ogImage ? 'yes' : 'no')
 
-    if (host.includes('instagram.com')) {
+    if (host.includes('tiktok.com')) {
+      // TikTok is a SPA — og:title stays stale (shows collection/feed name).
+      // og:description is usually the actual video caption. Try DOM first, then fall back.
+      var ttDescEl =
+        document.querySelector('[data-e2e="video-desc"]') ||
+        document.querySelector('[data-e2e="browse-video-desc"]') ||
+        document.querySelector('[data-e2e="video-detail-desc"]') ||
+        document.querySelector('[data-e2e="search-video-desc"]')
+
+      if (ttDescEl && ttDescEl.innerText && ttDescEl.innerText.trim().length > 2) {
+        var ttRaw = ttDescEl.innerText.trim()
+        ogTitle = ttRaw.split('\n')[0].slice(0, 120)
+        ogDesc  = ttRaw
+      } else if (ogDesc && ogDesc.length > 5) {
+        ogTitle = ogDesc.split('\n')[0].slice(0, 120) || ogTitle
+      }
+
+      // Thumbnail: TikTok videos have no poster attribute and og:image is stale (profile pic).
+      // 1. Canvas capture of the current video frame (works because src is a same-origin blob URL)
+      // 2. If canvas throws (tainted), fall back to screenshot crop via _videoBounds
+      var ttVid = document.querySelector('[data-e2e="browse-video"] video') ||
+                  document.querySelector('video')
+      var ttVideoBounds = null
+
+      // /photo/ URLs are slideshows even though TikTok auto-plays them with a video-like player
+      var ttIsSlideshow = window.location.pathname.includes('/photo/')
+
+      if (ttVid && ttVid.videoWidth > 0 && !ttIsSlideshow) {
+        // ── VIDEO PATH ──
+        try {
+          var ttOrigTime = ttVid.currentTime
+          ttVid.currentTime = 0
+          await new Promise(function(resolve) { ttVid.onseeked = resolve; setTimeout(resolve, 600) })
+          var ttCanvas = document.createElement('canvas')
+          ttCanvas.width  = ttVid.videoWidth
+          ttCanvas.height = ttVid.videoHeight
+          ttCanvas.getContext('2d').drawImage(ttVid, 0, 0)
+          var ttDataUrl = ttCanvas.toDataURL('image/jpeg', 0.85)
+          if (ttDataUrl && ttDataUrl.length > 5000) ogImage = ttDataUrl
+          ttVid.currentTime = ttOrigTime
+        } catch (ttCe) {}
+
+        if (!ogImage) {
+          var ttVr = ttVid.getBoundingClientRect()
+          if (ttVr.width > 0 && ttVr.height > 0)
+            ttVideoBounds = { left: ttVr.left, top: ttVr.top, width: ttVr.width, height: ttVr.height }
+        }
+
+        if (!ogImage && !ttVideoBounds && _validUrl(_rawOgImage)) ogImage = _rawOgImage
+        return { title: ogTitle, description: ogDesc, image: ogImage, _debug: _debug,
+                 _isVideo: true, _videoBounds: ttVideoBounds, _dpr: window.devicePixelRatio || 1 }
+
+      } else {
+        // ── SLIDESHOW / PHOTO PATH ──
+        // TikTok photo posts use /photo/ URLs. The player has two separate navigation layers:
+        //   • Slideshow arrows: div[class*="DivRightArrow"] — advances within the post
+        //   • Post navigation:  button[data-e2e="arrow-right"] — moves to the next post
+        // We must click only the DivRightArrow div, never the button.
+        var ttPhotoRoot = document.querySelector('[class*="DivPhotoVideoContainer"]') ||
+                          document.querySelector('[class*="DivPhotoWrapper"]') ||
+                          document.querySelector('[data-e2e="browse-video"]') ||
+                          document.body
+
+        var ttSeen = new Set()
+        var ttSlides = []
+
+        var ttCollectImgs = function() {
+          Array.from(ttPhotoRoot.querySelectorAll('img')).forEach(function(img) {
+            var src = img.src || ''
+            if (!src.startsWith('http') || ttSeen.has(src)) return
+            var isCDN = src.includes('tiktokcdn') || src.includes('tiktok.com/obj')
+            if (!isCDN) return
+            if (src.includes('user-avatar') || src.includes('/user/')) return
+            var w = img.naturalWidth || img.width || 0
+            if (w > 0 && w < 150) return
+            ttSeen.add(src)
+            ttSlides.push(src)
+          })
+        }
+
+        ttCollectImgs()
+
+        // Advance through slides using the slideshow-internal arrow (a div, not the post-nav button)
+        var ttSlideNext = ttPhotoRoot.querySelector('[class*="DivRightArrow"]') ||
+                          document.querySelector('[class*="DivRightArrow"]')
+        if (ttSlideNext) {
+          for (var ttSi = 0; ttSi < 25; ttSi++) {
+            var ttPrevLen = ttSlides.length
+            ttSlideNext.click()
+            for (var ttPi = 0; ttPi < 8; ttPi++) {
+              await new Promise(function(r) { setTimeout(r, 150) })
+              ttCollectImgs()
+              if (ttSlides.length > ttPrevLen) break
+            }
+            if (ttSlides.length === ttPrevLen) break  // no new image loaded — end of slideshow
+          }
+        }
+
+        if (ttSlides.length > 0) ogImage = ttSlides[0]
+        if (!ogImage && _validUrl(_rawOgImage)) ogImage = _rawOgImage
+
+        return { title: ogTitle, description: ogDesc, image: ogImage, _debug: _debug,
+                 _allImages: ttSlides, _isVideo: false, _type: 'TikTokSlideshow' }
+      }
+
+    } else if (host.includes('instagram.com')) {
       ogImage = ''
 
       var modal = document.querySelector('[role="dialog"]') ||
@@ -37,10 +144,10 @@ async function extractMeta() {
       }
       var allModalImgs = Array.from(root.querySelectorAll('img')).filter(isCarouselImg)
 
-      var videoPlayer = document.querySelector('[aria-label="Video player"]') ||
-                        document.querySelector('[aria-label="Video"]')
-      // Scope video detection to root only — document.querySelector('video') causes false
-      // positives when background feed videos are in the DOM behind an image carousel
+      // Both scoped to root — document.querySelector causes false positives when background
+      // feed videos/Reels are in the DOM behind the photo carousel modal
+      var videoPlayer = root.querySelector('[aria-label="Video player"]') ||
+                        root.querySelector('[aria-label="Video"]')
       var vid = root.querySelector('video')
       var isVideo = !!(vid || videoPlayer)
       var videoBounds = null
@@ -201,7 +308,100 @@ async function extractMeta() {
                _allImages: _allImages }
     }
 
-    return { title: ogTitle, description: ogDesc, image: ogImage, _debug: _debug }
+    // JSON-LD structured data — product/article pages embed rich metadata here
+    // (Zara Home, IKEA, most e-commerce sites use Product schema)
+    var ldScripts = document.querySelectorAll('script[type="application/ld+json"]')
+    for (var _li = 0; _li < ldScripts.length; _li++) {
+      try {
+        var _ld = JSON.parse(ldScripts[_li].textContent || '{}')
+        var _ldItems = Array.isArray(_ld) ? _ld : [_ld]
+        for (var _lj = 0; _lj < _ldItems.length; _lj++) {
+          var _item = _ldItems[_lj]
+          var _isProduct = (_item['@type'] || '').indexOf('Product') > -1
+          // On SPAs, og:title often shows navigation/category text instead of the product name.
+          // JSON-LD Product.name is always the real product title — prefer it unconditionally.
+          if (_isProduct && _item.name) ogTitle = String(_item.name).slice(0, 200)
+          else if (!ogTitle && _item.name) ogTitle = String(_item.name).slice(0, 200)
+          if (!ogDesc && _item.description) ogDesc = String(_item.description).slice(0, 500)
+          if (!ogImage) {
+            var _img = _item.image
+            var _imgUrl = ''
+            if (typeof _img === 'string')                _imgUrl = _img
+            else if (Array.isArray(_img) && _img.length) _imgUrl = typeof _img[0] === 'string' ? _img[0] : (_img[0].url || '')
+            else if (_img && _img.url)                   _imgUrl = _img.url
+            if (_validUrl(_imgUrl)) ogImage = _imgUrl
+          }
+        }
+      } catch(_le) {}
+      if (ogImage && ogTitle) break
+    }
+
+    // DOM image fallback — largest visible rendered image on the page
+    if (!ogImage) {
+      var _candidates = Array.from(document.querySelectorAll('img'))
+        .filter(function(i) {
+          return i.naturalWidth > 200 && i.naturalHeight > 200 && i.src && i.src.indexOf('http') === 0
+        })
+        .sort(function(a, b) { return (b.naturalWidth * b.naturalHeight) - (a.naturalWidth * a.naturalHeight) })
+      if (_candidates.length) ogImage = _candidates[0].src
+    }
+
+    // Extract price from Open Graph product namespace or JSON-LD offers
+    var detectedPrice = ''
+    var priceAmountMeta = document.querySelector('meta[property="product:price:amount"]') ||
+                          document.querySelector('meta[property="og:price:amount"]')
+    if (priceAmountMeta) {
+      var priceVal = priceAmountMeta.content || ''
+      var currencyMeta = document.querySelector('meta[property="product:price:currency"]') ||
+                         document.querySelector('meta[property="og:price:currency"]')
+      var currency = currencyMeta ? (currencyMeta.content || '') : ''
+      if (priceVal) detectedPrice = currency ? currency + priceVal : priceVal
+    }
+    if (!detectedPrice) {
+      var ldScriptsPrice = document.querySelectorAll('script[type="application/ld+json"]')
+      for (var _pi = 0; _pi < ldScriptsPrice.length && !detectedPrice; _pi++) {
+        try {
+          var _pld = JSON.parse(ldScriptsPrice[_pi].textContent || '{}')
+          var _pItems = Array.isArray(_pld) ? _pld : [_pld]
+          for (var _pj = 0; _pj < _pItems.length; _pj++) {
+            var _offers = _pItems[_pj].offers
+            var _offer = Array.isArray(_offers) ? _offers[0] : _offers
+            if (_offer && _offer.price) {
+              var _cur = _offer.priceCurrency || ''
+              detectedPrice = _cur ? _cur + _offer.price : String(_offer.price)
+              break
+            }
+          }
+        } catch(_pe) {}
+      }
+    }
+
+    // Detect content type from the live DOM for JS-rendered sites
+    var detectedType = ''
+    var ogTypeMeta = (document.querySelector('meta[property="og:type"]') || {}).content || ''
+    if (ogTypeMeta.toLowerCase().indexOf('product') > -1) {
+      detectedType = 'Product'
+    } else if (document.querySelector('meta[property^="product:price"]')) {
+      detectedType = 'Product'
+    } else {
+      // JSON-LD @type
+      var ldScriptsType = document.querySelectorAll('script[type="application/ld+json"]')
+      for (var _ti = 0; _ti < ldScriptsType.length && !detectedType; _ti++) {
+        try {
+          var _tld = JSON.parse(ldScriptsType[_ti].textContent || '{}')
+          var _tItems = Array.isArray(_tld) ? _tld : [_tld]
+          for (var _tj = 0; _tj < _tItems.length; _tj++) {
+            var _st = (_tItems[_tj]['@type'] || '')
+            if (_st.indexOf('Product') > -1) { detectedType = 'Product'; break }
+            if (_st.indexOf('Recipe')  > -1) { detectedType = 'Recipe';  break }
+          }
+        } catch(_te) {}
+      }
+    }
+    // Schema.org microdata
+    if (!detectedType && document.querySelector('[itemtype*="schema.org/Product"]')) detectedType = 'Product'
+
+    return { title: ogTitle, description: ogDesc, image: ogImage, _debug: _debug, _type: detectedType, _price: detectedPrice }
   } catch(e) {
     return { title: '', description: '', image: '', _debug: 'ERR:' + String(e.message).slice(0, 60) }
   }
@@ -234,6 +434,12 @@ chrome.tabs.query({ active: true, currentWindow: true }, ([tab]) => {
   currentUrl          = tab.url || ''
   urlEl.textContent   = currentUrl
   titleEl.textContent = tab.title || currentUrl
+
+  // Warn when saving a TikTok profile/collection page instead of a specific video
+  if (currentUrl.includes('tiktok.com') && !currentUrl.includes('/video/')) {
+    statusEl.textContent = 'Tip: open the video fullscreen first so the URL points to the specific video, then save.'
+    statusEl.className   = 'status'
+  }
 })
 
 saveBtn.addEventListener('click', async () => {
@@ -282,6 +488,8 @@ saveBtn.addEventListener('click', async () => {
         provided_description: pageMetadata?.description || '',
         provided_image:       pageMetadata?.image       || '',
         provided_images:      pageMetadata?._allImages  || [],
+        provided_type:        pageMetadata?._type       || '',
+        provided_price:       pageMetadata?._price      || '',
         is_video:             pageMetadata?._isVideo    || false,
       }),
     })

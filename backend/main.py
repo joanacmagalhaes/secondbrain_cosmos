@@ -33,6 +33,8 @@ class SaveRequest(BaseModel):
     provided_description: str = ""
     provided_image: str = ""
     provided_images: list[str] = []
+    provided_type: str = ""
+    provided_price: str = ""
     is_video: bool = False
 
 
@@ -108,10 +110,19 @@ def create_save(body: SaveRequest, background_tasks: BackgroundTasks):
         conn.close()
         raise HTTPException(status_code=422, detail=f"Could not scrape URL: {e}")
 
-    # prefer browser-extracted values (work on login-gated sites like Instagram)
-    title       = meta["title"]       or body.provided_title
-    description = meta["description"] or body.provided_description
-    raw_image   = meta["image"]       or body.provided_image
+    # Extension data from the live rendered DOM takes priority — the backend scraper
+    # often receives bot-detection or skeleton HTML for JS-heavy/login-gated sites
+    title       = body.provided_title       or meta["title"]
+    description = body.provided_description or meta["description"]
+    _img_candidate = body.provided_image or meta["image"]
+    raw_image = _img_candidate if _img_candidate and _img_candidate not in ("undefined", "null") else ""
+    price       = body.provided_price       or meta.get("price", "")
+    # Extension-detected type wins when scraper falls back to generic "Article"
+    if meta["type"] == "Article" and body.provided_type:
+        meta["type"] = body.provided_type
+    # Allow extension to refine TikTok into a subtype (e.g. slideshow vs video)
+    if body.provided_type == "TikTokSlideshow" and meta["type"] == "TikTok":
+        meta["type"] = "TikTokSlideshow"
     if body.is_video and meta["type"] == "Instagram":
         meta["type"] = "InstagramVideo"
     # convert base64 screenshots to file immediately — don't store giant strings in SQLite
@@ -121,10 +132,10 @@ def create_save(body: SaveRequest, background_tasks: BackgroundTasks):
     raw_images = body.provided_images if len(body.provided_images) > 1 else []
 
     conn.execute(
-        "INSERT INTO saves (url, title, description, image, tags, notes, content, type, images, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO saves (url, title, description, image, tags, notes, content, type, images, price, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (body.url, title, description, image,
          "[]", body.notes, meta["content"], meta["type"],
-         json.dumps(raw_images), datetime.now(timezone.utc).isoformat()),
+         json.dumps(raw_images), price, datetime.now(timezone.utc).isoformat()),
     )
     conn.commit()
     row = conn.execute("SELECT * FROM saves WHERE url = ?", (body.url,)).fetchone()
@@ -138,6 +149,7 @@ def create_save(body: SaveRequest, background_tasks: BackgroundTasks):
 TYPE_DEFAULT_TAGS = {
     "Instagram": ["instagram"],
     "TikTok": ["tiktok", "video"],
+    "TikTokSlideshow": ["tiktok"],
     "YouTube": ["youtube", "video"],
     "Pinterest": ["pinterest"],
     "Twitter": ["twitter"],
@@ -291,4 +303,5 @@ def _row_to_dict(row):
         d["images"] = json.loads(d.get("images") or "[]")
     except Exception:
         d["images"] = []
+    d.setdefault("price", "")
     return d

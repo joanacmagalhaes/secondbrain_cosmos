@@ -1,10 +1,13 @@
+import { useState } from 'react'
+
 const VIDEO_TYPES = new Set(['YouTube', 'TikTok', 'Video', 'InstagramVideo'])
 
 const TYPE_ICONS = {
-  YouTube:        '▶',
-  Instagram:      '◎',
-  InstagramVideo: '▶',
-  TikTok:         '♪',
+  YouTube:          '▶',
+  Instagram:        '◎',
+  InstagramVideo:   '▶',
+  TikTok:           '♪',
+  TikTokSlideshow:  '♪',
   Pinterest: '⊕',
   Twitter:   '✕',
   Reddit:    '◉',
@@ -17,11 +20,13 @@ const TYPE_ICONS = {
 }
 
 export default function SaveCard({ save, onClick }) {
+  const [imgError, setImgError] = useState(false)
+
   let hostname = ''
   try { hostname = new URL(save.url).hostname.replace('www.', '') } catch {}
 
   const icon     = TYPE_ICONS[save.type] || null
-  const hasImage = !!save.image
+  const hasImage = !!save.image && !imgError
   const isTagging = save.tags.length === 0
   const isVideo  = VIDEO_TYPES.has(save.type)
 
@@ -35,7 +40,7 @@ export default function SaveCard({ save, onClick }) {
           src={save.image}
           alt=""
           className="w-full h-auto block"
-          onError={e => { e.target.style.display = 'none' }}
+          onError={() => setImgError(true)}
         />
 
         {/* play icon — always visible on video cards */}
@@ -67,8 +72,15 @@ export default function SaveCard({ save, onClick }) {
           </div>
         )}
 
+        {/* price badge */}
+        {save.price && (
+          <div className="absolute top-2.5 left-2.5 bg-black/70 backdrop-blur-sm text-white text-[11px] font-semibold px-2 py-0.5 rounded-md pointer-events-none">
+            {save.price}
+          </div>
+        )}
+
         {/* tagging indicator */}
-        {isTagging && (
+        {isTagging && !save.price && (
           <div className="absolute top-2.5 right-2.5 w-2 h-2 rounded-full bg-violet-400 animate-pulse" />
         )}
       </div>
@@ -83,6 +95,11 @@ export default function SaveCard({ save, onClick }) {
                  shadow-[0_2px_8px_rgba(0,0,0,0.06)] hover:shadow-[0_8px_20px_rgba(0,0,0,0.11)]
                  transition-shadow duration-200 group"
     >
+      {save.price && (
+        <span className="inline-block mb-2 bg-neutral-100 text-neutral-600 text-[11px] font-semibold px-2 py-0.5 rounded-md">
+          {save.price}
+        </span>
+      )}
       <p className="text-sm font-medium text-neutral-900 leading-snug line-clamp-5 mb-3">
         {save.title || hostname}
       </p>
