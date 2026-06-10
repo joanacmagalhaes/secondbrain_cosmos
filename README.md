@@ -101,6 +101,17 @@ The secondmind icon will appear in your toolbar. Pin it for easy access.
 
 ---
 
+## Starting the app
+
+Instead of opening terminals manually every time, you can double-click the start script at the root of the repo:
+
+- **Windows**: double-click `start.bat`
+- **macOS / Linux**: run `chmod +x start.sh` once, then double-click `start.sh`
+
+This opens the backend and frontend in separate terminal windows and launches the app in your browser automatically. Ollama runs as a background service and starts on its own after installation.
+
+---
+
 ## Usage
 
 1. Browse to any page you want to save (article, Instagram post, TikTok video, product page, etc.)
