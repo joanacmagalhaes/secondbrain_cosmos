@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import SaveCard from './SaveCard'
 import SaveDetail from './SaveDetail'
+import Universe from './Universe'
 
 const API = 'http://localhost:8000'
 
@@ -51,6 +52,7 @@ export default function App() {
   const [selected, setSelected] = useState(null)
   const [showAddModal, setShowAddModal] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
+  const [showUniverse, setShowUniverse] = useState(false)
 
   const fetchSaves = useCallback(async (q = '', type = '') => {
     setLoading(true)
@@ -197,6 +199,20 @@ export default function App() {
             </svg>
           </button>
           <button
+            onClick={() => setShowUniverse(true)}
+            title="Universe"
+            className="shrink-0 text-neutral-400 hover:text-violet-600 transition"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5">
+              <circle cx="12" cy="12" r="10"/>
+              <ellipse cx="12" cy="12" rx="4" ry="10" transform="rotate(45 12 12)"/>
+              <circle cx="12" cy="12" r="2.5" fill="currentColor" stroke="none"/>
+              <circle cx="6" cy="7" r="1" fill="currentColor" stroke="none"/>
+              <circle cx="17" cy="16" r="1" fill="currentColor" stroke="none"/>
+              <circle cx="18" cy="7" r="0.8" fill="currentColor" stroke="none"/>
+            </svg>
+          </button>
+          <button
             onClick={openAdd}
             className="shrink-0 bg-violet-600 hover:bg-violet-700 text-white text-sm font-medium px-4 py-2 rounded-full transition"
           >
@@ -313,6 +329,7 @@ export default function App() {
           ))}
         </div>
       </main>
+      {showUniverse && <Universe onClose={() => setShowUniverse(false)} />}
     </div>
   )
 }

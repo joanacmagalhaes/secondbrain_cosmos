@@ -2,20 +2,29 @@ import { useState, useEffect } from 'react'
 
 const API = 'http://localhost:8000'
 
+const TYPE_LABELS = {
+  YouTube: 'YouTube', Instagram: 'Instagram', InstagramVideo: 'Instagram Reel',
+  TikTok: 'TikTok', TikTokSlideshow: 'TikTok Slideshow', Pinterest: 'Pinterest',
+  Twitter: 'Twitter / X', Reddit: 'Reddit', Spotify: 'Spotify', GitHub: 'GitHub',
+  Video: 'Video', Recipe: 'Recipe', Product: 'Product', Article: 'Article',
+}
+
 export default function SaveDetail({ save, onClose, onUpdate, onDelete }) {
   const [tags, setTags] = useState(save.tags)
-  const [tagInput, setTagInput] = useState(save.tags.join(', '))
+  const [tagInput, setTagInput] = useState('')
   const [editingTags, setEditingTags] = useState(false)
   const [notes, setNotes] = useState(save.notes || '')
   const [editingNotes, setEditingNotes] = useState(false)
-  const [currentSave, setCurrentSave] = useState(save)
   const [imgIndex, setImgIndex] = useState(0)
   const carouselImages = save.images?.length > 1 ? save.images : (save.image ? [save.image] : [])
 
   let hostname = ''
   try { hostname = new URL(save.url).hostname.replace('www.', '') } catch {}
 
-  // poll for tags if they're still empty (Ollama still running in background)
+  const dateLabel = save.created_at
+    ? new Date(save.created_at).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })
+    : ''
+
   useEffect(() => {
     if (tags.length > 0) return
     const interval = setInterval(async () => {
@@ -24,22 +33,34 @@ export default function SaveDetail({ save, onClose, onUpdate, onDelete }) {
       const updated = await res.json()
       if (updated.tags.length > 0) {
         setTags(updated.tags)
-        setTagInput(updated.tags.join(', '))
         clearInterval(interval)
       }
     }, 4000)
     return () => clearInterval(interval)
   }, [save.id, tags.length])
 
-  const saveTags = async () => {
-    const newTags = tagInput.split(',').map(t => t.trim()).filter(Boolean)
+  const addTag = async (raw) => {
+    const newTag = raw.trim().replace(/^#/, '')
+    if (!newTag || tags.includes(newTag)) return
+    const newTags = [...tags, newTag]
     await fetch(`${API}/saves/${save.id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ tags: newTags }),
     })
     setTags(newTags)
-    setEditingTags(false)
+    setTagInput('')
+    onUpdate(save.id, { tags: newTags })
+  }
+
+  const removeTag = async (tag) => {
+    const newTags = tags.filter(t => t !== tag)
+    await fetch(`${API}/saves/${save.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tags: newTags }),
+    })
+    setTags(newTags)
     onUpdate(save.id, { tags: newTags })
   }
 
@@ -61,182 +82,234 @@ export default function SaveDetail({ save, onClose, onUpdate, onDelete }) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
+      className="fixed inset-0 z-50 overflow-y-auto bg-black/25 backdrop-blur-sm"
       onClick={onClose}
     >
-      <div
-        className="bg-white rounded-3xl w-full max-w-xl max-h-[88vh] overflow-y-auto shadow-2xl"
-        onClick={e => e.stopPropagation()}
-      >
-        {/* image / carousel */}
-        {carouselImages.length > 0 && (
-          <div className="relative overflow-hidden rounded-t-3xl">
-            <img
-              key={imgIndex}
-              src={carouselImages[imgIndex]}
-              alt=""
-              className="w-full h-auto block"
-              onError={e => { e.target.parentElement.style.display = 'none' }}
-            />
+      <div className="min-h-full flex items-center justify-center p-6">
+        <div
+          className="w-full max-w-6xl rounded-3xl shadow-2xl overflow-hidden my-4"
+          style={{ background: '#f4f4f2' }}
+          onClick={e => e.stopPropagation()}
+        >
 
-            {/* carousel nav */}
-            {carouselImages.length > 1 && (
-              <>
-                {imgIndex > 0 && (
-                  <button
-                    onClick={e => { e.stopPropagation(); setImgIndex(i => i - 1) }}
-                    className="absolute left-2 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-black/50 backdrop-blur-sm
-                               text-white text-lg flex items-center justify-center hover:bg-black/70 transition-colors"
-                  >‹</button>
-                )}
-                {imgIndex < carouselImages.length - 1 && (
-                  <button
-                    onClick={e => { e.stopPropagation(); setImgIndex(i => i + 1) }}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-black/50 backdrop-blur-sm
-                               text-white text-lg flex items-center justify-center hover:bg-black/70 transition-colors"
-                  >›</button>
-                )}
-                <div className="absolute bottom-3 left-0 right-0 flex justify-center gap-1.5 pointer-events-none">
-                  {carouselImages.map((_, i) => (
-                    <span key={i} className={`w-1.5 h-1.5 rounded-full transition-colors ${i === imgIndex ? 'bg-white' : 'bg-white/40'}`} />
-                  ))}
-                </div>
-              </>
-            )}
-
-            {/* play button for video types */}
-            {['YouTube', 'TikTok', 'Video', 'InstagramVideo'].includes(save.type) && (
+          {/* Nav */}
+          <div className="flex items-center justify-between px-10 pt-7 pb-0">
+            <button
+              onClick={onClose}
+              className="flex items-center gap-1.5 text-sm text-neutral-400 hover:text-neutral-700 transition-colors"
+            >
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5">
+                <path d="M10 3L5 8l5 5"/>
+              </svg>
+              Back
+            </button>
+            <div className="flex items-center gap-4">
               <a
                 href={save.url}
                 target="_blank"
                 rel="noopener noreferrer"
                 onClick={e => e.stopPropagation()}
-                className="absolute inset-0 flex items-center justify-center group/play"
+                className="flex items-center gap-1.5 text-sm text-neutral-500 hover:text-neutral-800 transition-colors border border-neutral-300 rounded-full px-3 py-1"
               >
-                <div className="w-16 h-16 rounded-full bg-black/50 backdrop-blur-sm flex items-center justify-center
-                                group-hover/play:bg-black/70 transition-colors">
-                  <svg viewBox="0 0 24 24" fill="white" className="w-7 h-7 ml-1">
-                    <path d="M8 5v14l11-7z"/>
-                  </svg>
-                </div>
+                Open link
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="w-3 h-3">
+                  <path d="M3 8h10M9 4l4 4-4 4"/>
+                </svg>
               </a>
-            )}
-          </div>
-        )}
-
-        <div className="p-6 flex flex-col gap-5">
-          {/* title + source */}
-          <div>
-            <a
-              href={save.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-lg font-semibold text-neutral-900 hover:text-violet-700 transition-colors leading-snug block mb-1"
-            >
-              {save.title || save.url}
-            </a>
-            <span className="text-xs text-neutral-400">{hostname}</span>
-          </div>
-
-          {/* description */}
-          {save.description && (
-            <p className="text-sm text-neutral-600 leading-relaxed">{save.description}</p>
-          )}
-
-          {/* page content preview */}
-          {save.content && save.content !== save.description && (
-            <details className="group">
-              <summary className="text-xs text-neutral-400 cursor-pointer hover:text-violet-600 transition-colors select-none">
-                Show full page content
-              </summary>
-              <p className="text-sm text-neutral-500 leading-relaxed mt-2 whitespace-pre-wrap line-clamp-[20]">
-                {save.content}
-              </p>
-            </details>
-          )}
-
-          {/* tags */}
-          <div>
-            <p className="text-xs font-medium text-neutral-400 uppercase tracking-wide mb-2">Tags</p>
-            {editingTags ? (
-              <div className="flex gap-2">
-                <input
-                  autoFocus
-                  value={tagInput}
-                  onChange={e => setTagInput(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && saveTags()}
-                  className="flex-1 border border-neutral-200 rounded-xl px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-violet-400"
-                  placeholder="tag1, tag2, tag3"
-                />
-                <button onClick={saveTags} className="text-sm bg-violet-600 text-white px-3 py-1.5 rounded-xl">Save</button>
-                <button onClick={() => setEditingTags(false)} className="text-sm text-neutral-500 px-2 py-1.5 rounded-xl hover:bg-neutral-100">✕</button>
-              </div>
-            ) : (
-              <div className="flex flex-wrap gap-1.5 items-center">
-                {tags.length === 0
-                  ? <span className="text-xs text-neutral-400 italic animate-pulse">tagging…</span>
-                  : tags.map(tag => (
-                    <span key={tag} className="text-xs bg-violet-50 text-violet-600 rounded-full px-3 py-1 font-medium">
-                      {tag}
-                    </span>
-                  ))
-                }
-                <button
-                  onClick={() => setEditingTags(true)}
-                  className="text-xs text-neutral-300 hover:text-violet-600 transition-colors ml-1"
-                >
-                  + edit
-                </button>
-              </div>
-            )}
-          </div>
-
-          {/* notes */}
-          <div>
-            <p className="text-xs font-medium text-neutral-400 uppercase tracking-wide mb-2">Notes</p>
-            {editingNotes ? (
-              <div className="flex flex-col gap-2">
-                <textarea
-                  autoFocus
-                  value={notes}
-                  onChange={e => setNotes(e.target.value)}
-                  rows={3}
-                  className="border border-neutral-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-violet-400 resize-none"
-                />
-                <div className="flex gap-2">
-                  <button onClick={saveNotes} className="text-sm bg-violet-600 text-white px-3 py-1.5 rounded-xl">Save</button>
-                  <button onClick={() => setEditingNotes(false)} className="text-sm text-neutral-500 px-2 py-1.5 rounded-xl hover:bg-neutral-100">Cancel</button>
-                </div>
-              </div>
-            ) : (
-              <p
-                onClick={() => setEditingNotes(true)}
-                className="text-sm text-neutral-500 cursor-text hover:text-neutral-700 transition-colors min-h-[20px]"
-              >
-                {notes || <span className="italic text-neutral-300">Add a note…</span>}
-              </p>
-            )}
-          </div>
-
-          {/* footer */}
-          <div className="flex items-center justify-between pt-4 border-t border-neutral-100">
-            <span className="text-xs text-neutral-300">
-              {new Date(save.created_at).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })}
-            </span>
-            <div className="flex gap-3 items-center">
               <button
                 onClick={handleDelete}
-                className="text-xs text-red-400 hover:text-red-600 transition-colors"
+                className="text-sm text-neutral-400 hover:text-red-500 transition-colors"
               >
                 Delete
               </button>
-              <button
-                onClick={onClose}
-                className="text-xs text-neutral-400 hover:text-neutral-700 transition-colors"
-              >
-                Close
-              </button>
             </div>
+          </div>
+
+          {/* Hero: left (title + tags + desc) | right (image) */}
+          <div className="px-10 py-8 grid grid-cols-3 gap-10 items-start">
+
+            {/* Left */}
+            <div className="col-span-1 flex flex-col gap-5">
+              <h1 className="text-4xl font-bold text-neutral-900 leading-tight">
+                {save.title || hostname}
+              </h1>
+
+              {/* Tags */}
+              <div className="flex flex-wrap gap-2 items-center">
+                {tags.length === 0 && (
+                  <span className="text-xs text-neutral-400 italic animate-pulse">tagging…</span>
+                )}
+                {tags.map(tag => (
+                  <button
+                    key={tag}
+                    onClick={() => removeTag(tag)}
+                    className="group flex items-center gap-1 text-sm px-3 py-1 rounded-full bg-violet-100 text-violet-700 font-medium hover:bg-red-50 hover:text-red-500 transition-colors"
+                    title="Click to remove"
+                  >
+                    #{tag}
+                    <span className="opacity-0 group-hover:opacity-100 text-xs leading-none">×</span>
+                  </button>
+                ))}
+                {editingTags ? (
+                  <input
+                    autoFocus
+                    value={tagInput}
+                    onChange={e => setTagInput(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') { addTag(tagInput); }
+                      if (e.key === 'Escape') { setEditingTags(false); setTagInput(''); }
+                    }}
+                    onBlur={() => { if (tagInput) addTag(tagInput); setEditingTags(false); setTagInput(''); }}
+                    placeholder="add tag"
+                    className="text-sm px-3 py-1 rounded-full border border-violet-300 outline-none focus:border-violet-500 w-24 bg-white"
+                  />
+                ) : (
+                  <button
+                    onClick={() => setEditingTags(true)}
+                    className="w-7 h-7 rounded-full border border-neutral-300 text-neutral-400 hover:border-violet-400 hover:text-violet-500 flex items-center justify-center text-lg leading-none transition-colors"
+                  >+</button>
+                )}
+              </div>
+
+              {/* Description */}
+              {save.description && (
+                <p className="text-neutral-600 leading-relaxed text-base">
+                  {save.description}
+                </p>
+              )}
+            </div>
+
+            {/* Right: image */}
+            <div className="col-span-2">
+              {carouselImages.length > 0 ? (
+                <div className="relative rounded-2xl overflow-hidden bg-neutral-100">
+                  <img
+                    key={imgIndex}
+                    src={carouselImages[imgIndex]}
+                    alt=""
+                    className="w-full h-auto block"
+                    onError={e => { e.target.parentElement.style.display = 'none' }}
+                  />
+
+                  {/* play button for video types */}
+                  {['YouTube', 'TikTok', 'Video', 'InstagramVideo'].includes(save.type) && (
+                    <a
+                      href={save.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={e => e.stopPropagation()}
+                      className="absolute inset-0 flex items-center justify-center group/play"
+                    >
+                      <div className="w-14 h-14 rounded-full bg-black/50 backdrop-blur-sm flex items-center justify-center group-hover/play:bg-black/70 transition-colors">
+                        <svg viewBox="0 0 24 24" fill="white" className="w-6 h-6 ml-0.5"><path d="M8 5v14l11-7z"/></svg>
+                      </div>
+                    </a>
+                  )}
+
+                  {/* carousel controls */}
+                  {carouselImages.length > 1 && (
+                    <>
+                      <button
+                        onClick={e => { e.stopPropagation(); setImgIndex(i => Math.max(0, i - 1)) }}
+                        disabled={imgIndex === 0}
+                        className="absolute left-3 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-black/60 text-white text-xl flex items-center justify-center hover:bg-black/80 transition-colors disabled:opacity-20 disabled:cursor-default"
+                      >‹</button>
+                      <button
+                        onClick={e => { e.stopPropagation(); setImgIndex(i => Math.min(carouselImages.length - 1, i + 1)) }}
+                        disabled={imgIndex === carouselImages.length - 1}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-black/60 text-white text-xl flex items-center justify-center hover:bg-black/80 transition-colors disabled:opacity-20 disabled:cursor-default"
+                      >›</button>
+                      <div className="absolute bottom-3 left-0 right-0 flex justify-center gap-1.5 pointer-events-none">
+                        {carouselImages.map((_, i) => (
+                          <span key={i} className={`w-1.5 h-1.5 rounded-full transition-colors ${i === imgIndex ? 'bg-white' : 'bg-white/40'}`} />
+                        ))}
+                      </div>
+                      <div className="absolute top-3 right-3 bg-black/50 text-white text-xs px-2 py-0.5 rounded-full pointer-events-none">
+                        {imgIndex + 1} / {carouselImages.length}
+                      </div>
+                    </>
+                  )}
+                </div>
+              ) : (
+                <div className="rounded-2xl bg-neutral-100 flex items-center justify-center text-neutral-400 text-sm" style={{ minHeight: '200px' }}>
+                  No image
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Bottom cards */}
+          <div className="px-10 pb-10 grid grid-cols-3 gap-5">
+
+            {/* Details */}
+            <div className="bg-white rounded-2xl p-5">
+              <p className="text-sm font-semibold text-neutral-900 mb-4">Details</p>
+              <div className="flex flex-col gap-2.5">
+                {save.type && (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-neutral-400">Type</span>
+                    <span className="text-neutral-700">{TYPE_LABELS[save.type] || save.type}</span>
+                  </div>
+                )}
+                <div className="flex justify-between text-sm">
+                  <span className="text-neutral-400">Added</span>
+                  <span className="text-neutral-700">{dateLabel}</span>
+                </div>
+                {save.price && (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-neutral-400">Price</span>
+                    <span className="text-neutral-700 font-medium">{save.price}</span>
+                  </div>
+                )}
+                <div className="flex justify-between text-sm gap-4">
+                  <span className="text-neutral-400 shrink-0">Link</span>
+                  <a
+                    href={save.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={e => e.stopPropagation()}
+                    className="text-neutral-600 hover:text-neutral-900 truncate transition-colors"
+                  >
+                    {hostname} ↗
+                  </a>
+                </div>
+              </div>
+            </div>
+
+            {/* Notes */}
+            <div className="bg-white rounded-2xl p-5 flex flex-col gap-3">
+              <p className="text-sm font-semibold text-neutral-900">Notes</p>
+              {editingNotes ? (
+                <>
+                  <textarea
+                    autoFocus
+                    value={notes}
+                    onChange={e => setNotes(e.target.value)}
+                    rows={4}
+                    className="text-sm text-neutral-700 leading-relaxed resize-none outline-none w-full"
+                    placeholder="Write something…"
+                  />
+                  <div className="flex gap-2">
+                    <button onClick={saveNotes} className="text-xs bg-neutral-900 text-white px-3 py-1.5 rounded-lg">Save</button>
+                    <button onClick={() => setEditingNotes(false)} className="text-xs text-neutral-400 hover:text-neutral-700 px-2 py-1.5 rounded-lg">Cancel</button>
+                  </div>
+                </>
+              ) : (
+                <p
+                  onClick={() => setEditingNotes(true)}
+                  className="text-sm text-neutral-500 leading-relaxed cursor-text flex-1"
+                >
+                  {notes || <span className="text-neutral-300 italic">Add a note…</span>}
+                </p>
+              )}
+            </div>
+
+            {/* Collections — placeholder for future */}
+            <div className="bg-white rounded-2xl p-5 opacity-50 select-none">
+              <p className="text-sm font-semibold text-neutral-900 mb-4">Collections</p>
+              <p className="text-sm text-neutral-400">Coming soon</p>
+            </div>
+
           </div>
         </div>
       </div>
