@@ -101,14 +101,23 @@ The secondmind icon will appear in your toolbar. Pin it for easy access.
 
 ---
 
-## Starting the app
+## Running the app
 
-Instead of opening terminals manually every time, you can double-click the start script at the root of the repo:
+### 5. Install Electron dependencies
 
-- **Windows**: double-click `start.bat`
-- **macOS / Linux**: run `chmod +x start.sh` once, then double-click `start.sh`
+This is a one-time step. From the root of the repo:
 
-This opens the backend and frontend in separate terminal windows and launches the app in your browser automatically. Ollama runs as a background service and starts on its own after installation.
+```bash
+npm install
+```
+
+### 6. Start
+
+Double-click **`SecondMind.bat`** (Windows) or **`start.sh`** (macOS/Linux).
+
+That's it — the app opens as a native desktop window. No browser needed, no terminals to manage.
+
+> **Tip:** right-click `SecondMind.bat` → Send to → Desktop (create shortcut) to launch it from your desktop.
 
 ---
 
