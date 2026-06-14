@@ -113,11 +113,12 @@ npm install
 
 ### 6. Start
 
-Double-click **`SecondMind.bat`** (Windows) or **`start.sh`** (macOS/Linux).
+- **Windows:** double-click **`SecondMind.vbs`** — opens the app with no terminal window
+- **macOS / Linux:** run `chmod +x SecondMind.sh` once, then double-click **`SecondMind.sh`**
 
-That's it — the app opens as a native desktop window. No browser needed, no terminals to manage.
+> **Tip (Windows):** right-click `SecondMind.vbs` → Send to → Desktop (create shortcut) for quick access from your desktop.
 
-> **Tip:** right-click `SecondMind.bat` → Send to → Desktop (create shortcut) to launch it from your desktop.
+> **Troubleshooting:** if the app doesn't open, run `SecondMind-debug.bat` instead — it shows the terminal output so you can see what's wrong.
 
 ---
 

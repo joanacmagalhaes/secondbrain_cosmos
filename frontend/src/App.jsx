@@ -50,6 +50,7 @@ export default function App() {
   const [error, setError] = useState('')
   const [selected, setSelected] = useState(null)
   const [showAddModal, setShowAddModal] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
 
   const fetchSaves = useCallback(async (q = '', type = '') => {
     setLoading(true)
@@ -73,6 +74,12 @@ export default function App() {
     } catch {}
   }, [])
 
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true)
+    await Promise.all([fetchSaves(query, activeType), fetchTypes()])
+    setTimeout(() => setRefreshing(false), 600)
+  }, [fetchSaves, fetchTypes, query, activeType])
+
   useEffect(() => {
     fetchSaves()
     fetchTypes()
@@ -84,7 +91,7 @@ export default function App() {
     return () => clearTimeout(t)
   }, [query, activeType, fetchSaves])
 
-  // auto-refresh while any save is still being tagged
+  // fast refresh while any save is still being tagged
   useEffect(() => {
     const needsTagging = saves.some(s => s.tags.length === 0)
     if (!needsTagging) return
@@ -94,6 +101,22 @@ export default function App() {
     }, 5000)
     return () => clearInterval(t)
   }, [saves, query, activeType, fetchSaves, fetchTypes])
+
+  // background poll every 10 s to pick up saves added via the extension
+  useEffect(() => {
+    const t = setInterval(async () => {
+      try {
+        const res = await fetch(`${API}/saves/count`)
+        if (!res.ok) return
+        const { count } = await res.json()
+        if (count !== saves.length) {
+          fetchSaves(query, activeType)
+          fetchTypes()
+        }
+      } catch {}
+    }, 10000)
+    return () => clearInterval(t)
+  }, [saves.length, query, activeType, fetchSaves, fetchTypes])
 
   const openAdd = () => { setError(''); setShowAddModal(true) }
   const closeAdd = () => { setShowAddModal(false); setError('') }
@@ -158,6 +181,21 @@ export default function App() {
             placeholder="Search anything…"
             className="flex-1 bg-neutral-100 rounded-full px-5 py-2 text-sm outline-none focus:ring-2 focus:ring-violet-300 transition placeholder:text-neutral-400"
           />
+          <button
+            onClick={handleRefresh}
+            title="Refresh"
+            className="shrink-0 text-neutral-400 hover:text-violet-600 transition"
+          >
+            <svg
+              viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+              strokeLinecap="round" strokeLinejoin="round"
+              className={`w-5 h-5 ${refreshing ? 'animate-spin' : ''}`}
+            >
+              <path d="M23 4v6h-6"/>
+              <path d="M1 20v-6h6"/>
+              <path d="M3.51 9a9 9 0 0114.36-3.36L23 10M1 14l5.13 4.36A9 9 0 0020.49 15"/>
+            </svg>
+          </button>
           <button
             onClick={openAdd}
             className="shrink-0 bg-violet-600 hover:bg-violet-700 text-white text-sm font-medium px-4 py-2 rounded-full transition"

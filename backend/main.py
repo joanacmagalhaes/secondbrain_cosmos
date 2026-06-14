@@ -55,6 +55,14 @@ def startup():
     init_db()
 
 
+@app.get("/saves/count")
+def count_saves():
+    conn = get_conn()
+    count = conn.execute("SELECT COUNT(*) FROM saves").fetchone()[0]
+    conn.close()
+    return {"count": count}
+
+
 @app.get("/saves")
 def list_saves(q: str = "", type: str = ""):
     conn = get_conn()

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, shell } = require('electron')
+const { app, BrowserWindow, shell, Menu } = require('electron')
 const { spawn } = require('child_process')
 const path = require('path')
 const os = require('os')
@@ -23,20 +23,24 @@ function startBackend() {
 }
 
 function createWindow() {
+  const iconExt = os.platform() === 'darwin' ? 'icns' : os.platform() === 'win32' ? 'ico' : 'png'
+  const iconPath = path.join(__dirname, `icon.${iconExt}`)
+
   mainWindow = new BrowserWindow({
     width: 1400,
     height: 900,
     minWidth: 900,
     minHeight: 600,
     title: 'secondmind',
+    icon: require('fs').existsSync(iconPath) ? iconPath : undefined,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
     },
   })
 
-  const isDev = process.env.NODE_ENV === 'development'
-  if (isDev) {
+  // app.isPackaged is false when running via `electron .` (dev), true when built
+  if (!app.isPackaged) {
     mainWindow.loadURL('http://localhost:5173')
   } else {
     mainWindow.loadFile(path.join(__dirname, '../frontend/dist/index.html'))
@@ -50,6 +54,7 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  Menu.setApplicationMenu(null) // remove the default File/Edit/View/Window/Help menu bar
   startBackend()
   setTimeout(createWindow, 1500) // give the backend a moment to bind to :8000
 

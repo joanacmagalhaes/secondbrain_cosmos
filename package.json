@@ -4,13 +4,12 @@
   "description": "Personal second brain desktop app",
   "main": "electron/main.js",
   "scripts": {
-    "dev": "concurrently -n vite,electron -c cyan,magenta \"npm run dev --prefix frontend\" \"wait-on http://localhost:5173 && cross-env NODE_ENV=development electron .\"",
+    "dev": "concurrently -n vite,electron -c cyan,magenta \"npm run dev --prefix frontend\" \"wait-on http://localhost:5173 && electron .\"",
     "build": "npm run build --prefix frontend",
     "start": "electron ."
   },
   "devDependencies": {
     "concurrently": "^8.2.2",
-    "cross-env": "^7.0.3",
     "electron": "^28.3.3",
     "wait-on": "^7.2.0"
   }

@@ -322,8 +322,11 @@ async function extractMeta() {
           // JSON-LD Product.name is always the real product title — prefer it unconditionally.
           if (_isProduct && _item.name) ogTitle = String(_item.name).slice(0, 200)
           else if (!ogTitle && _item.name) ogTitle = String(_item.name).slice(0, 200)
-          if (!ogDesc && _item.description) ogDesc = String(_item.description).slice(0, 500)
-          if (!ogImage) {
+          // Products: prefer JSON-LD description (product-specific) over og:description (often a generic site tagline)
+          if ((_isProduct || !ogDesc) && _item.description) ogDesc = String(_item.description).slice(0, 500)
+          // Products: JSON-LD image is the actual product photo; og:image on SPAs/e-commerce is often a brand logo.
+          // Prefer it unconditionally, same as we do for title.
+          if (_isProduct || !ogImage) {
             var _img = _item.image
             var _imgUrl = ''
             if (typeof _img === 'string')                _imgUrl = _img
@@ -400,6 +403,22 @@ async function extractMeta() {
     }
     // Schema.org microdata
     if (!detectedType && document.querySelector('[itemtype*="schema.org/Product"]')) detectedType = 'Product'
+
+    // Product pages: the og:image is often a brand logo on JS-heavy SPAs. If we're on a product
+    // page, scan the DOM for the largest visible image that doesn't look like a logo/banner.
+    if (detectedType === 'Product') {
+      var _ogIsLogo = !ogImage || /logo|banner|sprite|icon|placeholder/i.test(ogImage)
+      var _pdImgs = Array.from(document.querySelectorAll('img'))
+        .filter(function(i) {
+          var src = i.src || ''
+          return src.indexOf('http') === 0
+            && !/logo|banner|sprite|icon|placeholder/i.test(src)
+            && i.naturalWidth >= 300 && i.naturalHeight >= 300
+        })
+        .sort(function(a, b) { return (b.naturalWidth * b.naturalHeight) - (a.naturalWidth * a.naturalHeight) })
+      if (_pdImgs.length > 0 && (_ogIsLogo || (_pdImgs[0].naturalWidth * _pdImgs[0].naturalHeight) > 400 * 400))
+        ogImage = _pdImgs[0].src
+    }
 
     return { title: ogTitle, description: ogDesc, image: ogImage, _debug: _debug, _type: detectedType, _price: detectedPrice }
   } catch(e) {
