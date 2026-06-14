@@ -10,8 +10,10 @@ from urllib.parse import urlparse
 
 DB_PATH = "secondmind.db"
 OLLAMA_URL = "http://localhost:11434/api/generate"
+OLLAMA_EMBED_URL = "http://localhost:11434/api/embeddings"
 OLLAMA_MODEL = "llama3.2:latest"
 OLLAMA_VISION_MODEL = "moondream"  # run: ollama pull moondream
+OLLAMA_EMBED_MODEL = "nomic-embed-text"  # run: ollama pull nomic-embed-text
 IMAGES_DIR = "images"
 
 
@@ -64,11 +66,19 @@ def init_db():
             created_at TEXT
         )
     """)
-    for col in ("content TEXT", "type TEXT", "images TEXT", "price TEXT"):
+    for col in ("content TEXT", "type TEXT", "images TEXT", "price TEXT", "embedding TEXT"):
         try:
             conn.execute(f"ALTER TABLE saves ADD COLUMN {col}")
         except Exception:
             pass
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS clusters (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            item_ids TEXT NOT NULL,
+            generated_at TEXT NOT NULL
+        )
+    """)
     # backfill type for existing saves that have none
     rows = conn.execute("SELECT id, url FROM saves WHERE type IS NULL").fetchall()
     for row in rows:
@@ -286,6 +296,128 @@ def get_vision_tags(image_source: str) -> list:
     except Exception as e:
         print(f"Vision tagging failed: {e}")
     return []
+
+
+def get_embedding(title: str, description: str, content: str = "") -> list[float]:
+    """Generate a semantic embedding vector for an item via Ollama nomic-embed-text.
+    Returns [] if the model is not installed or the call fails.
+    Install with: ollama pull nomic-embed-text"""
+    text = f"{title}. {description}. {content[:1000]}".strip()
+    if not text:
+        return []
+    try:
+        res = requests.post(OLLAMA_EMBED_URL, json={
+            "model": OLLAMA_EMBED_MODEL,
+            "prompt": text,
+        }, timeout=30)
+        if res.status_code != 200:
+            return []
+        return res.json().get("embedding", [])
+    except Exception as e:
+        print(f"Embedding failed: {e}")
+        return []
+
+
+def _cosine_sim(a: list, b: list) -> float:
+    dot = sum(x * y for x, y in zip(a, b))
+    mag_a = sum(x * x for x in a) ** 0.5
+    mag_b = sum(x * x for x in b) ** 0.5
+    if mag_a == 0 or mag_b == 0:
+        return 0.0
+    return dot / (mag_a * mag_b)
+
+
+def _kmeans(embeddings: list, k: int, max_iter: int = 20) -> list:
+    import random
+    n = len(embeddings)
+    if n <= k:
+        return list(range(n))
+
+    # k-means++ initialization
+    centroids = [list(embeddings[random.randrange(n)])]
+    for _ in range(k - 1):
+        dists = [max(0.0, 1 - max(_cosine_sim(e, c) for c in centroids)) for e in embeddings]
+        total = sum(dists)
+        if total == 0:
+            centroids.append(list(embeddings[random.randrange(n)]))
+            continue
+        r, acc = random.random() * total, 0.0
+        for i, d in enumerate(dists):
+            acc += d
+            if acc >= r:
+                centroids.append(list(embeddings[i]))
+                break
+
+    labels = list(range(n))
+    for _ in range(max_iter):
+        new_labels = [max(range(k), key=lambda j: _cosine_sim(e, centroids[j])) for e in embeddings]
+        if new_labels == labels:
+            break
+        labels = new_labels
+        for j in range(k):
+            members = [embeddings[i] for i, l in enumerate(labels) if l == j]
+            if members:
+                dim = len(members[0])
+                centroids[j] = [sum(m[d] for m in members) / len(members) for d in range(dim)]
+
+    return labels
+
+
+def name_cluster(items: list) -> str:
+    """Ask Ollama to name a cluster. items = list of (title, description) tuples."""
+    lines = '\n'.join(
+        f'- "{t}"' + (f' — {d[:120]}' if d else '')
+        for t, d in items[:5]
+    )
+    prompt = (
+        f"A user saved these items:\n{lines}\n\n"
+        "Give this collection a short, evocative name (2-4 words). "
+        "Reply with ONLY the name, no quotes, no punctuation."
+    )
+    try:
+        res = requests.post(OLLAMA_URL, json={
+            "model": OLLAMA_MODEL,
+            "prompt": prompt,
+            "stream": False,
+        }, timeout=30)
+        name = res.json().get("response", "").strip().strip('"').strip("'")
+        return name or "Collection"
+    except Exception as e:
+        print(f"Cluster naming failed: {e}")
+        return "Collection"
+
+
+def generate_clusters(conn) -> list:
+    """Run k-means on all embedded saves and name each cluster via Ollama."""
+    rows = conn.execute(
+        "SELECT id, title, description, embedding FROM saves WHERE embedding IS NOT NULL"
+    ).fetchall()
+
+    if len(rows) < 3:
+        return []
+
+    ids = [r[0] for r in rows]
+    titles = [r[1] or "" for r in rows]
+    descriptions = [r[2] or "" for r in rows]
+    embeddings = [json.loads(r[3]) for r in rows]
+
+    k = max(3, min(6, len(rows) // 4))
+    labels = _kmeans(embeddings, k)
+
+    groups: dict[int, list] = {}
+    for i, label in enumerate(labels):
+        groups.setdefault(label, []).append(i)
+
+    result = []
+    for label, indices in groups.items():
+        embs = [embeddings[i] for i in indices]
+        dim = len(embs[0])
+        centroid = [sum(e[d] for e in embs) / len(embs) for d in range(dim)]
+        sorted_idx = sorted(indices, key=lambda i: _cosine_sim(embeddings[i], centroid), reverse=True)
+        name = name_cluster([(titles[i], descriptions[i]) for i in sorted_idx[:5]])
+        result.append({"name": name, "item_ids": [ids[i] for i in indices]})
+
+    return result
 
 
 def get_all_tags(title: str, description: str, image_source: str = "") -> list:

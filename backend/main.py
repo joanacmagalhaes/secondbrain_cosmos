@@ -8,7 +8,7 @@ import json
 import os
 import hashlib
 import requests as http_requests
-from saver import init_db, scrape, get_all_tags, DB_PATH
+from saver import init_db, scrape, get_all_tags, get_embedding, generate_clusters, DB_PATH
 
 IMAGES_DIR = "images"
 IMAGE_BASE_URL = "http://localhost:8000"
@@ -243,9 +243,14 @@ def _tag_and_update(save_id: int, title: str, description: str, save_type: str =
         if t not in tags:
             tags.append(t)
 
+    row = conn.execute("SELECT content FROM saves WHERE id = ?", (save_id,)).fetchone()
+    content = row[0] if row else ""
+    embedding = get_embedding(title, description, content or "")
+
     conn.execute(
-        "UPDATE saves SET tags = ?, image = ?, images = ? WHERE id = ?",
-        (json.dumps(tags), local_image, json.dumps(cached_images), save_id)
+        "UPDATE saves SET tags = ?, image = ?, images = ?, embedding = ? WHERE id = ?",
+        (json.dumps(tags), local_image, json.dumps(cached_images),
+         json.dumps(embedding) if embedding else None, save_id)
     )
     conn.commit()
     conn.close()
@@ -299,6 +304,154 @@ def import_instagram(data: dict):
     conn.commit()
     conn.close()
     return {"inserted": inserted}
+
+
+def _cosine_similarity(a: list[float], b: list[float]) -> float:
+    dot = sum(x * y for x, y in zip(a, b))
+    mag_a = sum(x * x for x in a) ** 0.5
+    mag_b = sum(x * x for x in b) ** 0.5
+    if mag_a == 0 or mag_b == 0:
+        return 0.0
+    return dot / (mag_a * mag_b)
+
+
+@app.get("/search")
+def semantic_search(q: str = "", limit: int = 50):
+    if not q.strip():
+        return []
+
+    query_embedding = get_embedding(q, "", "")
+
+    conn = get_conn()
+
+    if not query_embedding:
+        # Ollama unavailable — fall back to plain text match
+        rows = conn.execute(
+            "SELECT * FROM saves WHERE lower(title) LIKE lower(?) OR lower(description) LIKE lower(?) OR lower(notes) LIKE lower(?)",
+            [f"%{q}%", f"%{q}%", f"%{q}%"]
+        ).fetchall()
+        conn.close()
+        return [_row_to_dict(r) for r in rows]
+
+    rows = conn.execute("SELECT * FROM saves WHERE embedding IS NOT NULL").fetchall()
+    conn.close()
+
+    scored = []
+    for row in rows:
+        emb = json.loads(row["embedding"] or "[]")
+        if emb:
+            score = _cosine_similarity(query_embedding, emb)
+            if score > 0.2:
+                scored.append((score, row))
+
+    scored.sort(key=lambda x: x[0], reverse=True)
+    return [_row_to_dict(row) for _, row in scored[:limit]]
+
+
+@app.get("/saves/{save_id}/similar")
+def similar_saves(save_id: int, limit: int = 10):
+    conn = get_conn()
+    target = conn.execute("SELECT * FROM saves WHERE id = ?", (save_id,)).fetchone()
+    if not target:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Not found")
+
+    target_embedding = json.loads(target["embedding"] or "[]")
+    if not target_embedding:
+        conn.close()
+        raise HTTPException(status_code=422, detail="This item has no embedding yet")
+
+    rows = conn.execute(
+        "SELECT * FROM saves WHERE id != ? AND embedding IS NOT NULL", (save_id,)
+    ).fetchall()
+    conn.close()
+
+    scored = []
+    for row in rows:
+        emb = json.loads(row["embedding"] or "[]")
+        if emb:
+            scored.append((_cosine_similarity(target_embedding, emb), row))
+
+    scored.sort(key=lambda x: x[0], reverse=True)
+    return [_row_to_dict(row) for _, row in scored[:limit]]
+
+
+@app.get("/clusters")
+def get_clusters():
+    conn = get_conn()
+    rows = conn.execute("SELECT * FROM clusters ORDER BY id").fetchall()
+    if not rows:
+        conn.close()
+        return []
+
+    result = []
+    for row in rows:
+        item_ids = json.loads(row["item_ids"])
+        placeholders = ",".join("?" * len(item_ids))
+        saves = conn.execute(
+            f"SELECT * FROM saves WHERE id IN ({placeholders})", item_ids
+        ).fetchall()
+        result.append({
+            "id": row["id"],
+            "name": row["name"],
+            "item_ids": item_ids,
+            "saves": [_row_to_dict(s) for s in saves],
+            "generated_at": row["generated_at"],
+        })
+    conn.close()
+    return result
+
+
+@app.post("/clusters/generate")
+def generate_clusters_endpoint(background_tasks: BackgroundTasks):
+    conn = get_conn()
+    n = conn.execute("SELECT COUNT(*) FROM saves WHERE embedding IS NOT NULL").fetchone()[0]
+    conn.close()
+
+    if n < 3:
+        raise HTTPException(status_code=422, detail="Need at least 3 saves with embeddings to cluster")
+
+    def _run():
+        c = sqlite3.connect(DB_PATH)
+        c.row_factory = sqlite3.Row
+        clusters = generate_clusters(c)
+        c.execute("DELETE FROM clusters")
+        for cluster in clusters:
+            c.execute(
+                "INSERT INTO clusters (name, item_ids, generated_at) VALUES (?, ?, ?)",
+                (cluster["name"], json.dumps(cluster["item_ids"]), datetime.now(timezone.utc).isoformat())
+            )
+        c.commit()
+        c.close()
+        print(f"Clusters generated: {len(clusters)}")
+
+    background_tasks.add_task(_run)
+    return {"queued": True, "embedded_saves": n}
+
+
+@app.post("/embeddings/backfill")
+def backfill_embeddings(background_tasks: BackgroundTasks):
+    """Generate embeddings for all saves that don't have one yet."""
+    conn = get_conn()
+    rows = conn.execute(
+        "SELECT id, title, description, content FROM saves WHERE embedding IS NULL"
+    ).fetchall()
+    conn.close()
+
+    if not rows:
+        return {"queued": 0}
+
+    def _run():
+        c = sqlite3.connect(DB_PATH)
+        for row in rows:
+            emb = get_embedding(row["title"] or "", row["description"] or "", row["content"] or "")
+            if emb:
+                c.execute("UPDATE saves SET embedding = ? WHERE id = ?", (json.dumps(emb), row["id"]))
+                c.commit()
+        c.close()
+
+    background_tasks.add_task(_run)
+    return {"queued": len(rows)}
 
 
 def _row_to_dict(row):

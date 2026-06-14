@@ -22,29 +22,6 @@ const CLUSTER_LAYOUT = [
   [0.57, 0.50],
 ]
 
-function buildClusters(saves) {
-  const tagCount = {}
-  saves.forEach(save => {
-    const tags = Array.isArray(save.tags) ? save.tags : []
-    tags.forEach(t => { tagCount[t] = (tagCount[t] || 0) + 1 })
-  })
-  const topTags = Object.entries(tagCount)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 6)
-    .map(([t]) => t)
-  if (!topTags.length) return []
-
-  const map = {}
-  topTags.forEach((tag, i) => {
-    map[tag] = { id: i, name: tag, palette: PALETTE[i % PALETTE.length], layoutPos: CLUSTER_LAYOUT[i % CLUSTER_LAYOUT.length], saves: [] }
-  })
-  saves.forEach(save => {
-    const tags = Array.isArray(save.tags) ? save.tags : []
-    const t = tags.find(t => map[t]) || topTags[0]
-    map[t].saves.push(save)
-  })
-  return Object.values(map).filter(c => c.saves.length > 0)
-}
 
 export default function Universe({ onClose }) {
   const svgRef = useRef(null)
@@ -52,6 +29,7 @@ export default function Universe({ onClose }) {
   const simRef = useRef(null)
   const [clusters, setClusters] = useState([])
   const [loading, setLoading] = useState(true)
+  const [generating, setGenerating] = useState(false)
   const [selected, setSelected] = useState(null)
   const [hovered, setHovered] = useState(null)
   const selectedRef = useRef(null)
@@ -60,10 +38,36 @@ export default function Universe({ onClose }) {
 
   const fetchData = useCallback(async () => {
     try {
-      const res = await fetch(`${API}/saves`)
-      setClusters(buildClusters(await res.json()))
+      const res = await fetch(`${API}/clusters`)
+      const raw = await res.json()
+      setClusters(raw.map((c, i) => ({
+        ...c,
+        palette: PALETTE[i % PALETTE.length],
+        layoutPos: CLUSTER_LAYOUT[i % CLUSTER_LAYOUT.length],
+      })))
     } catch {}
     finally { setLoading(false) }
+  }, [])
+
+  const handleGenerate = useCallback(async () => {
+    setGenerating(true)
+    try {
+      await fetch(`${API}/clusters/generate`, { method: 'POST' })
+      // Poll until clusters appear
+      const poll = setInterval(async () => {
+        const res = await fetch(`${API}/clusters`)
+        const raw = await res.json()
+        if (raw.length) {
+          clearInterval(poll)
+          setClusters(raw.map((c, i) => ({
+            ...c,
+            palette: PALETTE[i % PALETTE.length],
+            layoutPos: CLUSTER_LAYOUT[i % CLUSTER_LAYOUT.length],
+          })))
+          setGenerating(false)
+        }
+      }, 3000)
+    } catch { setGenerating(false) }
   }, [])
 
   useEffect(() => { fetchData() }, [fetchData])
@@ -172,19 +176,15 @@ export default function Universe({ onClose }) {
       }))
     )
 
-    // Build ambient cross-cluster edges (saves sharing tags across clusters)
-    const ambient = []
+    // Ambient cross-cluster edges — random pairs to suggest the universe is connected
+    const crossPairs = []
     for (let i = 0; i < nodes.length; i++) {
-      const tagsA = new Set(nodes[i].save.tags || [])
       for (let j = i + 1; j < nodes.length; j++) {
-        if (nodes[i].cluster.id === nodes[j].cluster.id) continue
-        if ((nodes[j].save.tags || []).some(t => tagsA.has(t))) {
-          ambient.push({ a: nodes[i], b: nodes[j] })
-          if (ambient.length >= 70) break
-        }
+        if (nodes[i].cluster.id !== nodes[j].cluster.id) crossPairs.push([i, j])
       }
-      if (ambient.length >= 70) break
     }
+    crossPairs.sort(() => Math.random() - 0.5)
+    const ambient = crossPairs.slice(0, 60).map(([i, j]) => ({ a: nodes[i], b: nodes[j] }))
 
     // Layer 3 — ambient connection lines (always visible, very faint)
     const ambientLayer = root.append('g')
@@ -220,21 +220,24 @@ export default function Universe({ onClose }) {
         }
         setHovered(null)
       })
-      .on('click', function (e, d) {
+      .on('click', async function (e, d) {
         e.stopPropagation()
         setSelected(prev => prev?.id === d.save.id ? null : d.save)
         sourceNode = d
 
         nodeEls.attr('r', n => n.r).attr('opacity', 0.82).attr('stroke', 'rgba(255,255,255,0.4)').attr('stroke-width', 1)
         d3.select(this).attr('r', d.r + 4.5).attr('opacity', 1).attr('stroke', '#fff').attr('stroke-width', 2.5)
-
-        const tags = new Set(d.save.tags || [])
-        const connected = nodes.filter(n =>
-          n.save.id !== d.save.id && (n.save.tags || []).some(t => tags.has(t))
-        ).slice(0, 18)
-
         linkLayer.selectAll('line').remove()
-        if (connected.length) {
+        linkLayer.attr('opacity', 0)
+
+        try {
+          const res = await fetch(`${API}/saves/${d.save.id}/similar?limit=10`)
+          if (!res.ok) return
+          const similar = await res.json()
+          const similarIds = new Set(similar.map(s => s.id))
+          const connected = nodes.filter(n => similarIds.has(n.save.id))
+          if (!connected.length) return
+
           linkLayer.attr('opacity', 1)
           linkLayer.selectAll('line').data(connected).enter().append('line')
             .attr('stroke', d.cluster.palette.dot)
@@ -243,11 +246,9 @@ export default function Universe({ onClose }) {
             .attr('x1', d.x).attr('y1', d.y)
             .attr('x2', n => n.x).attr('y2', n => n.y)
 
-          nodeEls.filter(n => connected.some(c => c.save.id === n.save.id))
+          nodeEls.filter(n => similarIds.has(n.save.id))
             .attr('r', n => n.r + 2).attr('opacity', 0.95)
-        } else {
-          linkLayer.attr('opacity', 0)
-        }
+        } catch {}
       })
 
     svg.on('click', () => {
@@ -292,9 +293,17 @@ export default function Universe({ onClose }) {
             <p className="text-sm text-neutral-400">Building your universe…</p>
           </div>
         ) : !clusters.length ? (
-          <div className="flex flex-col items-center justify-center h-full gap-2 text-neutral-400">
+          <div className="flex flex-col items-center justify-center h-full gap-4 text-neutral-400">
             <p className="text-4xl">✦</p>
-            <p className="text-sm">Save more links to see your universe grow.</p>
+            <p className="text-sm">Your universe hasn't been mapped yet.</p>
+            <button
+              onClick={handleGenerate}
+              disabled={generating}
+              className="px-5 py-2.5 rounded-full text-sm font-medium text-white transition disabled:opacity-50"
+              style={{ background: '#7c3aed' }}
+            >
+              {generating ? 'Mapping universe…' : 'Map Universe'}
+            </button>
           </div>
         ) : (
           <svg ref={svgRef} className="w-full h-full block" />
@@ -317,6 +326,16 @@ export default function Universe({ onClose }) {
               <h1 className="text-sm font-semibold text-neutral-700">Universe</h1>
               <p className="text-[11px] text-neutral-400 mt-0.5">Everything is connected</p>
             </div>
+            {clusters.length > 0 && (
+              <button
+                onClick={handleGenerate}
+                disabled={generating}
+                className="px-3 py-1.5 rounded-full text-[11px] font-medium text-neutral-600 hover:text-violet-700 transition disabled:opacity-40"
+                style={{ background: 'rgba(255,255,255,0.8)', backdropFilter: 'blur(10px)', boxShadow: '0 1px 6px rgba(0,0,0,0.09)' }}
+              >
+                {generating ? 'Remapping…' : 'Remap'}
+              </button>
+            )}
           </div>
 
           {/* Legend */}
