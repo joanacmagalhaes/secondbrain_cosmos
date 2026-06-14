@@ -45,8 +45,11 @@ cd secondmind
 Download and install Ollama from [ollama.com](https://ollama.com), then pull the models:
 
 ```bash
-# Text tagging model (required)
+# Text tagging and cluster naming (required)
 ollama pull llama3.2
+
+# Semantic embeddings — powers search and Universe clustering (required)
+ollama pull nomic-embed-text
 
 # Vision model for image tagging (optional but recommended)
 ollama pull moondream
@@ -119,6 +122,19 @@ npm install
 > **Tip (Windows):** right-click `SecondMind.vbs` → Send to → Desktop (create shortcut) for quick access from your desktop.
 
 > **Troubleshooting:** if the app doesn't open, run `SecondMind-debug.bat` instead — it shows the terminal output so you can see what's wrong.
+
+---
+
+## First-time setup after launch
+
+Once the app is running for the first time, do these two steps:
+
+**1. Generate embeddings for existing saves** (one-time only — new saves are embedded automatically):
+```
+POST http://localhost:8000/embeddings/backfill
+```
+
+**2. Map your Universe** — open the Universe view (the orbit icon in the top bar) and click **Map Universe**. This groups your saves into semantic clusters. Takes 1–2 minutes depending on how many saves you have.
 
 ---
 
