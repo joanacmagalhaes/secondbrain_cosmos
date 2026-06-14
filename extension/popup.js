@@ -416,7 +416,8 @@ async function extractMeta() {
             && i.naturalWidth >= 300 && i.naturalHeight >= 300
         })
         .sort(function(a, b) { return (b.naturalWidth * b.naturalHeight) - (a.naturalWidth * a.naturalHeight) })
-      if (_pdImgs.length > 0 && (_ogIsLogo || (_pdImgs[0].naturalWidth * _pdImgs[0].naturalHeight) > 400 * 400))
+      // Only override when ogImage is missing or looks like a logo — don't replace a good JSON-LD image
+      if (_pdImgs.length > 0 && _ogIsLogo)
         ogImage = _pdImgs[0].src
     }
 
