@@ -33,12 +33,23 @@ Everything runs on your machine. No subscriptions, no cloud, no tracking.
 
 ## Installation
 
-### 1. Clone the repo
+### 1. Get the files
+
+**Option A — Download ZIP (no Git required):**
+
+1. Click the green **Code** button at the top of this page
+2. Click **Download ZIP**
+3. Extract the ZIP file anywhere on your computer (e.g. Desktop or Documents)
+4. Open the extracted folder — it should be called `secondmind-main` or similar
+
+**Option B — Git (if you have it):**
 
 ```bash
 git clone https://github.com/your-username/secondmind.git
 cd secondmind
 ```
+
+> All the steps below assume you're working inside this folder. When instructions say "open a terminal here", right-click the folder and choose **Open in Terminal** (Windows 11) or **Open PowerShell window here** (Windows 10).
 
 ### 2. Set up Ollama (AI tagging)
 
@@ -61,37 +72,20 @@ Ollama runs automatically in the background after installation. You can verify i
 
 ```bash
 cd backend
-
-# Create and activate a virtual environment
 python -m venv venv
-
-# On macOS/Linux:
-source venv/bin/activate
-# On Windows:
-venv\Scripts\activate
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Start the backend
-uvicorn main:app --reload
 ```
 
-The backend runs at `http://localhost:8000`. The SQLite database (`secondmind.db`) and cached images (`images/`) are created automatically on first run.
-
-### 4. Set up the frontend
-
-Open a new terminal:
+Install dependencies — **do not activate the venv first**, just call pip directly (avoids PowerShell execution policy issues on Windows):
 
 ```bash
-cd frontend
-npm install
-npm run dev
+# Windows
+venv\Scripts\pip install -r requirements.txt
+
+# macOS / Linux
+venv/bin/pip install -r requirements.txt
 ```
 
-The app opens at `http://localhost:5173`.
-
-### 5. Install the Chrome extension
+### 4. Install the Chrome extension
 
 1. Open your browser and go to the extensions page:
    - Chrome: `chrome://extensions`
@@ -106,35 +100,57 @@ The secondmind icon will appear in your toolbar. Pin it for easy access.
 
 ## Running the app
 
-### 5. Install Electron dependencies
-
-This is a one-time step. From the root of the repo:
-
-```bash
-npm install
-```
-
-### 6. Start
-
-- **Windows:** double-click **`SecondMind.vbs`** — opens the app with no terminal window
-- **macOS / Linux:** run `chmod +x SecondMind.sh` once, then double-click **`SecondMind.sh`**
-
-> **Tip (Windows):** right-click `SecondMind.vbs` → Send to → Desktop (create shortcut) for quick access from your desktop.
-
-> **Troubleshooting:** if the app doesn't open, run `SecondMind-debug.bat` instead — it shows the terminal output so you can see what's wrong.
+There are two ways to run secondmind. Pick whichever works best for you.
 
 ---
 
-## First-time setup after launch
+### Option A — Desktop app (Electron)
 
-Once the app is running for the first time, do these two steps:
+The app opens as a standalone window, no browser needed.
 
-**1. Generate embeddings for existing saves** (one-time only — new saves are embedded automatically):
+**Windows:**
+
+1. Open the `secondmind` folder
+2. Double-click **`SecondMind.vbs`**
+3. A terminal window opens — the first launch may take a minute while it installs what it needs
+4. Once you see the app window, you're done — you can close the terminal window if you want
+
+> **Tip:** right-click `SecondMind.vbs` → Send to → Desktop (shortcut) so you can launch it from your desktop next time.
+
+**macOS / Linux:**
+
+Open a terminal in the folder and run:
+
+```bash
+chmod +x SecondMind.sh   # only needed the first time
+./SecondMind.sh
 ```
-POST http://localhost:8000/embeddings/backfill
+
+---
+
+### Option B — Browser (simpler, works everywhere)
+
+Run the backend and frontend manually. The app opens in your browser at `http://localhost:5173`.
+
+**Terminal 1 — backend:**
+
+```bash
+cd backend
+# Windows
+venv\Scripts\uvicorn main:app --reload
+# macOS / Linux
+venv/bin/uvicorn main:app --reload
 ```
 
-**2. Map your Universe** — open the Universe view (the orbit icon in the top bar) and click **Map Universe**. This groups your saves into semantic clusters. Takes 1–2 minutes depending on how many saves you have.
+**Terminal 2 — frontend:**
+
+```bash
+cd frontend
+npm install   # first time only
+npm run dev
+```
+
+Open `http://localhost:5173` in your browser.
 
 ---
 
@@ -176,6 +192,62 @@ secondmind/
 │   └── content.js       # Fallback metadata extraction (injected into pages)
 └── README.md
 ```
+
+---
+
+## Troubleshooting
+
+### Windows: `venv\Scripts\activate` fails with "execution policy" error
+
+PowerShell blocks scripts by default. Either run this once to allow them:
+
+```powershell
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+```
+
+Or just skip activating the venv entirely — call `venv\Scripts\pip` and `venv\Scripts\uvicorn` directly (as shown in Option B above).
+
+### Windows: `npm` is not recognized
+
+Node.js was installed but the terminal doesn't know about it yet. Close all terminal windows and open a new one — the PATH update only takes effect in new sessions.
+
+### Double-clicking SecondMind.vbs does nothing at all
+
+The `.vbs` script runs everything in a hidden window — if anything fails, there is no visible error. The two most common causes:
+
+1. **`npm` not in PATH** — When launched from the desktop (via WScript), Windows uses a limited PATH that often doesn't include Node.js. Even if `npm` works fine in your terminal, it may not be found here.
+2. **Root dependencies not installed** — The Electron app needs its own `npm install` at the repo root (not just inside `frontend/`). If you skipped that step, `concurrently`, `electron`, and `wait-on` won't exist and the command fails immediately.
+
+**How to diagnose:** open a terminal (cmd or PowerShell), `cd` into the repo, and run:
+
+```bat
+SecondMind-debug.bat
+```
+
+This runs the same command but with a visible window, so you'll see the exact error. Fix it there, then the `.vbs` shortcut will work too.
+
+**Quick fix for the PATH issue:** always launch via the terminal shortcut above rather than double-clicking the `.vbs`. Or use **Option B** (browser mode) — it doesn't have this problem.
+
+### Desktop app opens but shows a blank page or no saves load
+
+The Electron app auto-starts the Python backend by spawning `backend/venv/Scripts/python.exe` (Windows) or `backend/venv/bin/python` (macOS/Linux). If that file doesn't exist, the backend silently fails — Electron still opens the window after a short delay, but all API calls to `localhost:8000` return errors.
+
+**Most common cause:** the backend venv hasn't been set up yet. Run the setup from step 3 of Installation first:
+
+```bash
+cd backend
+python -m venv venv
+venv\Scripts\pip install -r requirements.txt   # Windows
+# venv/bin/pip install -r requirements.txt    # macOS / Linux
+```
+
+Once the venv exists, restart the desktop app. To confirm the backend is starting correctly, run `SecondMind-debug.bat` from a terminal — you'll see `[backend]` log lines if it launched successfully, or an error message if it failed.
+
+> **Why does browser mode work but desktop mode doesn't?** In browser mode (Option B) you start uvicorn manually, so you see the error immediately if something is wrong. In desktop mode the backend is a hidden child process — failures are invisible unless you check the debug output.
+
+### The app loads but saves don't appear / backend errors
+
+Make sure Ollama is running (`http://localhost:11434` should respond). The backend starts Ollama calls on every save — if Ollama is stopped, tagging will silently fail but the save itself will still be stored.
 
 ---
 
