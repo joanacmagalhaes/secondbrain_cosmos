@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import SaveCard from './SaveCard'
 import SaveDetail from './SaveDetail'
 import Universe from './Universe'
+import Collections from './Collections'
 
 const API = 'http://localhost:8000'
 
@@ -58,7 +59,13 @@ export default function App() {
   const [showUniverse, setShowUniverse] = useState(false)
   const [showSaveMenu, setShowSaveMenu] = useState(false)
   const [showNoteEditor, setShowNoteEditor] = useState(false)
+  const [showCollections, setShowCollections] = useState(false)
+  const [showAddToCollection, setShowAddToCollection] = useState(false)
+  const [allCollections, setAllCollections] = useState([])
+  const [view, setView] = useState(() => localStorage.getItem('sm-view') || 'masonry')
   const uploadInputRef = useRef(null)
+
+  const changeView = (v) => { setView(v); localStorage.setItem('sm-view', v) }
   const [selecting, setSelecting] = useState(false)
   const [selectedIds, setSelectedIds] = useState(new Set())
 
@@ -341,6 +348,15 @@ export default function App() {
                 </svg>
               </button>
               <button
+                onClick={() => setShowCollections(true)}
+                title="Collections"
+                className="shrink-0 text-neutral-400 hover:text-violet-600 transition"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5">
+                  <path d="M3 7a2 2 0 012-2h3.586a1 1 0 01.707.293L10.707 6.7A1 1 0 0011.414 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V7z"/>
+                </svg>
+              </button>
+              <button
                 onClick={() => setSelecting(true)}
                 className="shrink-0 text-neutral-400 hover:text-violet-600 transition text-sm font-medium"
               >
@@ -503,8 +519,61 @@ export default function App() {
         />
       )}
 
-      {/* Grid */}
-      <main className="max-w-7xl mx-auto px-4 py-8">
+      {/* Library */}
+      <main className="max-w-7xl mx-auto px-4 py-6">
+
+        {/* toolbar */}
+        {!loading && saves.length > 0 && (
+          <div className="flex items-center justify-between mb-5">
+            <span className="text-xs text-neutral-400 font-medium tabular-nums">
+              {saves.length} {saves.length === 1 ? 'item' : 'items'}
+            </span>
+            <div className="flex items-center gap-0.5 bg-neutral-100 rounded-xl p-1">
+              {/* masonry */}
+              <button
+                onClick={() => changeView('masonry')}
+                title="Masonry"
+                className={`w-7 h-7 flex items-center justify-center rounded-lg transition-all ${view === 'masonry' ? 'bg-white shadow-sm text-neutral-800' : 'text-neutral-400 hover:text-neutral-600'}`}
+              >
+                <svg viewBox="0 0 16 16" fill="currentColor" className="w-3.5 h-3.5">
+                  <rect x="1" y="1" width="6" height="9" rx="1.2"/>
+                  <rect x="1" y="12" width="6" height="3" rx="1.2"/>
+                  <rect x="9" y="1" width="6" height="3" rx="1.2"/>
+                  <rect x="9" y="6" width="6" height="9" rx="1.2"/>
+                </svg>
+              </button>
+              {/* grid */}
+              <button
+                onClick={() => changeView('grid')}
+                title="Grid"
+                className={`w-7 h-7 flex items-center justify-center rounded-lg transition-all ${view === 'grid' ? 'bg-white shadow-sm text-neutral-800' : 'text-neutral-400 hover:text-neutral-600'}`}
+              >
+                <svg viewBox="0 0 16 16" fill="currentColor" className="w-3.5 h-3.5">
+                  <rect x="1" y="1" width="6" height="6" rx="1.2"/>
+                  <rect x="9" y="1" width="6" height="6" rx="1.2"/>
+                  <rect x="1" y="9" width="6" height="6" rx="1.2"/>
+                  <rect x="9" y="9" width="6" height="6" rx="1.2"/>
+                </svg>
+              </button>
+              {/* list */}
+              <button
+                onClick={() => changeView('list')}
+                title="List"
+                className={`w-7 h-7 flex items-center justify-center rounded-lg transition-all ${view === 'list' ? 'bg-white shadow-sm text-neutral-800' : 'text-neutral-400 hover:text-neutral-600'}`}
+              >
+                <svg viewBox="0 0 16 16" fill="currentColor" className="w-3.5 h-3.5">
+                  <rect x="1" y="1" width="4" height="4" rx="0.8"/>
+                  <rect x="7" y="2" width="8" height="2" rx="0.8"/>
+                  <rect x="1" y="6" width="4" height="4" rx="0.8"/>
+                  <rect x="7" y="7" width="8" height="2" rx="0.8"/>
+                  <rect x="1" y="11" width="4" height="4" rx="0.8"/>
+                  <rect x="7" y="12" width="8" height="2" rx="0.8"/>
+                </svg>
+              </button>
+            </div>
+          </div>
+        )}
+
         {loading && saves.length === 0 && (
           <p className="text-center text-neutral-400 py-20 text-sm">Loading…</p>
         )}
@@ -516,29 +585,60 @@ export default function App() {
                 ? `No results for "${query}"`
                 : activeType
                   ? `No ${activeType}s saved yet.`
-                  : 'Nothing saved yet. Hit + Save to add your first link.'}
+                  : 'Nothing saved yet. Hit + to add your first save.'}
             </p>
           </div>
         )}
-        <div className="columns-1 sm:columns-2 lg:columns-3 xl:columns-4 gap-4">
-          {saves.map(save => (
-            <SaveCard
-              key={save.id}
-              save={save}
-              selecting={selecting}
-              isSelected={selectedIds.has(save.id)}
-              onClick={() => selecting ? toggleSelect(save.id) : setSelected(save)}
-            />
-          ))}
-        </div>
+
+        {view === 'masonry' && (
+          <div className="columns-1 sm:columns-2 lg:columns-3 xl:columns-4 gap-4">
+            {saves.map(save => (
+              <SaveCard key={save.id} save={save} view="masonry"
+                selecting={selecting} isSelected={selectedIds.has(save.id)}
+                onClick={() => selecting ? toggleSelect(save.id) : setSelected(save)} />
+            ))}
+          </div>
+        )}
+
+        {view === 'grid' && (
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2">
+            {saves.map(save => (
+              <SaveCard key={save.id} save={save} view="grid"
+                selecting={selecting} isSelected={selectedIds.has(save.id)}
+                onClick={() => selecting ? toggleSelect(save.id) : setSelected(save)} />
+            ))}
+          </div>
+        )}
+
+        {view === 'list' && (
+          <div className="flex flex-col gap-1.5 max-w-3xl mx-auto">
+            {saves.map(save => (
+              <SaveCard key={save.id} save={save} view="list"
+                selecting={selecting} isSelected={selectedIds.has(save.id)}
+                onClick={() => selecting ? toggleSelect(save.id) : setSelected(save)} />
+            ))}
+          </div>
+        )}
+
       </main>
 
-      {/* Floating delete bar */}
+      {/* Floating select bar */}
       {selecting && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-30 flex items-center gap-3 px-5 py-3 rounded-2xl bg-white shadow-xl border border-neutral-100">
           <span className="text-sm text-neutral-500 min-w-[80px]">
             {selectedIds.size === 0 ? 'Nothing selected' : `${selectedIds.size} item${selectedIds.size > 1 ? 's' : ''} selected`}
           </span>
+          <button
+            onClick={async () => {
+              const res = await fetch(`${API}/collections`)
+              setAllCollections(await res.json())
+              setShowAddToCollection(true)
+            }}
+            disabled={selectedIds.size === 0}
+            className="px-4 py-1.5 rounded-full text-sm font-medium bg-neutral-800 hover:bg-neutral-900 text-white transition disabled:opacity-30 disabled:cursor-not-allowed"
+          >
+            Add to Collection
+          </button>
           <button
             onClick={handleDeleteSelected}
             disabled={selectedIds.size === 0}
@@ -549,7 +649,50 @@ export default function App() {
         </div>
       )}
 
+      {/* Add to Collection modal */}
+      {showAddToCollection && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
+             onClick={() => setShowAddToCollection(false)}>
+          <div onClick={e => e.stopPropagation()}
+               className="bg-white rounded-3xl w-full max-w-sm p-5 shadow-2xl flex flex-col gap-4">
+            <h2 className="text-base font-semibold text-neutral-900">Add to Collection</h2>
+            {allCollections.length === 0 ? (
+              <p className="text-sm text-neutral-400 text-center py-4">No collections yet. Create one first.</p>
+            ) : (
+              <div className="flex flex-col gap-1 max-h-72 overflow-y-auto">
+                {allCollections.map(c => (
+                  <button
+                    key={c.id}
+                    onClick={async () => {
+                      await fetch(`${API}/collections/${c.id}/items`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ save_ids: [...selectedIds] }),
+                      })
+                      setShowAddToCollection(false)
+                      exitSelect()
+                    }}
+                    className="flex items-center gap-3 px-4 py-3 rounded-2xl hover:bg-neutral-50 transition text-left"
+                  >
+                    <div className="w-5 h-5 rounded-full shrink-0" style={{ background: c.color }} />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-neutral-900 truncate">{c.name}</p>
+                      <p className="text-xs text-neutral-400">{c.save_count} items</p>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+            <button onClick={() => setShowAddToCollection(false)}
+              className="text-sm text-neutral-400 hover:text-neutral-600 transition text-center">
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
       {showUniverse && <Universe onClose={() => setShowUniverse(false)} />}
+      {showCollections && <Collections onClose={() => setShowCollections(false)} />}
 
       {/* Full-screen note editor */}
       {showNoteEditor && (

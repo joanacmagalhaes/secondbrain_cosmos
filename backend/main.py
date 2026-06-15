@@ -52,6 +52,20 @@ class UpdateRequest(BaseModel):
     type: str | None = None
 
 
+class CollectionRequest(BaseModel):
+    name: str
+    color: str = '#AFC8E8'
+
+
+class CollectionUpdateRequest(BaseModel):
+    name: str | None = None
+    color: str | None = None
+
+
+class AddItemsRequest(BaseModel):
+    save_ids: list[int]
+
+
 def get_conn():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
@@ -61,6 +75,27 @@ def get_conn():
 @app.on_event("startup")
 def startup():
     init_db()
+    conn = get_conn()
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS collections (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            color TEXT NOT NULL DEFAULT '#AFC8E8',
+            created_at TEXT NOT NULL
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS collection_items (
+            collection_id INTEGER NOT NULL,
+            save_id INTEGER NOT NULL,
+            added_at TEXT NOT NULL,
+            PRIMARY KEY (collection_id, save_id),
+            FOREIGN KEY (collection_id) REFERENCES collections(id) ON DELETE CASCADE,
+            FOREIGN KEY (save_id) REFERENCES saves(id) ON DELETE CASCADE
+        )
+    """)
+    conn.commit()
+    conn.close()
 
 
 @app.get("/saves/count")
@@ -525,6 +560,115 @@ def backfill_embeddings(background_tasks: BackgroundTasks, force: bool = False):
 
     background_tasks.add_task(_run)
     return {"queued": len(rows)}
+
+
+@app.get("/collections")
+def list_collections():
+    conn = get_conn()
+    rows = conn.execute("SELECT * FROM collections ORDER BY created_at DESC").fetchall()
+    result = []
+    for c in rows:
+        cid = c["id"]
+        count = conn.execute(
+            "SELECT COUNT(*) FROM collection_items WHERE collection_id = ?", (cid,)
+        ).fetchone()[0]
+        previews = conn.execute(
+            "SELECT s.image FROM collection_items ci JOIN saves s ON s.id = ci.save_id "
+            "WHERE ci.collection_id = ? AND s.image != '' AND s.image IS NOT NULL "
+            "ORDER BY ci.added_at DESC LIMIT 3",
+            (cid,)
+        ).fetchall()
+        result.append({
+            "id": cid,
+            "name": c["name"],
+            "color": c["color"],
+            "save_count": count,
+            "preview_images": [p["image"] for p in previews],
+            "created_at": c["created_at"],
+        })
+    conn.close()
+    return result
+
+
+@app.post("/collections", status_code=201)
+def create_collection(body: CollectionRequest):
+    conn = get_conn()
+    conn.execute(
+        "INSERT INTO collections (name, color, created_at) VALUES (?, ?, ?)",
+        (body.name.strip(), body.color, datetime.now(timezone.utc).isoformat()),
+    )
+    conn.commit()
+    row = conn.execute("SELECT * FROM collections ORDER BY id DESC LIMIT 1").fetchone()
+    conn.close()
+    return {
+        "id": row["id"], "name": row["name"], "color": row["color"],
+        "save_count": 0, "preview_images": [], "created_at": row["created_at"],
+    }
+
+
+@app.patch("/collections/{coll_id}")
+def update_collection(coll_id: int, body: CollectionUpdateRequest):
+    conn = get_conn()
+    row = conn.execute("SELECT * FROM collections WHERE id = ?", (coll_id,)).fetchone()
+    if not row:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Not found")
+    name  = body.name  if body.name  is not None else row["name"]
+    color = body.color if body.color is not None else row["color"]
+    conn.execute("UPDATE collections SET name = ?, color = ? WHERE id = ?", (name, color, coll_id))
+    conn.commit()
+    conn.close()
+    return {"id": coll_id, "name": name, "color": color}
+
+
+@app.delete("/collections/{coll_id}", status_code=204)
+def delete_collection(coll_id: int):
+    conn = get_conn()
+    conn.execute("DELETE FROM collections WHERE id = ?", (coll_id,))
+    conn.commit()
+    conn.close()
+
+
+@app.get("/collections/{coll_id}/saves")
+def get_collection_saves(coll_id: int):
+    conn = get_conn()
+    rows = conn.execute(
+        "SELECT s.* FROM collection_items ci JOIN saves s ON s.id = ci.save_id "
+        "WHERE ci.collection_id = ? ORDER BY ci.added_at DESC",
+        (coll_id,),
+    ).fetchall()
+    conn.close()
+    return [_row_to_dict(r) for r in rows]
+
+
+@app.post("/collections/{coll_id}/items", status_code=201)
+def add_to_collection(coll_id: int, body: AddItemsRequest):
+    conn = get_conn()
+    now = datetime.now(timezone.utc).isoformat()
+    added = 0
+    for sid in body.save_ids:
+        try:
+            conn.execute(
+                "INSERT OR IGNORE INTO collection_items (collection_id, save_id, added_at) VALUES (?, ?, ?)",
+                (coll_id, sid, now),
+            )
+            added += 1
+        except Exception:
+            pass
+    conn.commit()
+    conn.close()
+    return {"added": added}
+
+
+@app.delete("/collections/{coll_id}/items/{save_id}", status_code=204)
+def remove_from_collection(coll_id: int, save_id: int):
+    conn = get_conn()
+    conn.execute(
+        "DELETE FROM collection_items WHERE collection_id = ? AND save_id = ?",
+        (coll_id, save_id),
+    )
+    conn.commit()
+    conn.close()
 
 
 def _row_to_dict(row):

@@ -1,1 +1,15 @@
-node_modules
+# dependencies
+node_modules/
+backend/venv/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# database & local data
+backend/secondmind.db
+backend/images/
+
+# build output
+frontend/dist/
