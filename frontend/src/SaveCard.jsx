@@ -19,7 +19,7 @@ const TYPE_ICONS = {
   Article:   '◈',
 }
 
-export default function SaveCard({ save, onClick }) {
+export default function SaveCard({ save, onClick, selecting = false, isSelected = false }) {
   const [imgError, setImgError] = useState(false)
 
   let hostname = ''
@@ -27,14 +27,14 @@ export default function SaveCard({ save, onClick }) {
 
   const icon     = TYPE_ICONS[save.type] || null
   const hasImage = !!save.image && !imgError
-  const isTagging = save.tags.length === 0
+  const isTagging = !save.tags?.length && !save.topics?.length
   const isVideo  = VIDEO_TYPES.has(save.type)
 
   if (hasImage) {
     return (
       <div
         onClick={onClick}
-        className="break-inside-avoid mb-3 rounded-2xl overflow-hidden cursor-pointer relative group"
+        className={`break-inside-avoid mb-3 rounded-2xl overflow-hidden cursor-pointer relative group transition-all ${isSelected ? 'ring-2 ring-violet-500 ring-offset-2' : ''}`}
       >
         <img
           src={save.image}
@@ -42,6 +42,17 @@ export default function SaveCard({ save, onClick }) {
           className="w-full h-auto block"
           onError={() => setImgError(true)}
         />
+
+        {/* selection checkbox */}
+        {selecting && (
+          <div className={`absolute top-2.5 left-2.5 w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all ${isSelected ? 'bg-violet-600 border-violet-600' : 'bg-white/80 border-white'}`}>
+            {isSelected && (
+              <svg viewBox="0 0 12 12" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3 h-3">
+                <path d="M2 6l3 3 5-5"/>
+              </svg>
+            )}
+          </div>
+        )}
 
         {/* play icon — always visible on video cards */}
         {isVideo && (
@@ -91,10 +102,19 @@ export default function SaveCard({ save, onClick }) {
   return (
     <div
       onClick={onClick}
-      className="break-inside-avoid mb-3 bg-white rounded-2xl p-4 cursor-pointer
+      className={`break-inside-avoid mb-3 bg-white rounded-2xl p-4 cursor-pointer
                  shadow-[0_2px_8px_rgba(0,0,0,0.06)] hover:shadow-[0_8px_20px_rgba(0,0,0,0.11)]
-                 transition-shadow duration-200 group"
+                 transition-all duration-200 group relative ${isSelected ? 'ring-2 ring-violet-500 ring-offset-2' : ''}`}
     >
+      {selecting && (
+        <div className={`absolute top-3 right-3 w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all ${isSelected ? 'bg-violet-600 border-violet-600' : 'border-neutral-300'}`}>
+          {isSelected && (
+            <svg viewBox="0 0 12 12" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3 h-3">
+              <path d="M2 6l3 3 5-5"/>
+            </svg>
+          )}
+        </div>
+      )}
       {save.price && (
         <span className="inline-block mb-2 bg-neutral-100 text-neutral-600 text-[11px] font-semibold px-2 py-0.5 rounded-md">
           {save.price}

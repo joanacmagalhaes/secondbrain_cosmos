@@ -8,7 +8,9 @@ import json
 import os
 import hashlib
 import requests as http_requests
-from saver import init_db, scrape, get_all_tags, get_embedding, generate_clusters, DB_PATH
+from saver import (init_db, scrape, get_all_tags, get_embedding,
+                   get_summary, get_topics, get_entities,
+                   generate_clusters, DB_PATH)
 
 IMAGES_DIR = "images"
 IMAGE_BASE_URL = "http://localhost:8000"
@@ -245,12 +247,18 @@ def _tag_and_update(save_id: int, title: str, description: str, save_type: str =
 
     row = conn.execute("SELECT content FROM saves WHERE id = ?", (save_id,)).fetchone()
     content = row[0] if row else ""
+
     embedding = get_embedding(title, description, content or "")
+    summary   = get_summary(title, description, content or "")
+    topics    = get_topics(title, description)
+    entities  = get_entities(title, description, content or "")
 
     conn.execute(
-        "UPDATE saves SET tags = ?, image = ?, images = ?, embedding = ? WHERE id = ?",
+        "UPDATE saves SET tags = ?, image = ?, images = ?, embedding = ?, "
+        "summary = ?, topics = ?, entities = ? WHERE id = ?",
         (json.dumps(tags), local_image, json.dumps(cached_images),
-         json.dumps(embedding) if embedding else None, save_id)
+         json.dumps(embedding) if embedding else None,
+         summary, json.dumps(topics), json.dumps(entities), save_id)
     )
     conn.commit()
     conn.close()
@@ -430,12 +438,13 @@ def generate_clusters_endpoint(background_tasks: BackgroundTasks):
 
 
 @app.post("/embeddings/backfill")
-def backfill_embeddings(background_tasks: BackgroundTasks):
-    """Generate embeddings for all saves that don't have one yet."""
+def backfill_embeddings(background_tasks: BackgroundTasks, force: bool = False):
+    """Generate embeddings for saves that don't have one yet.
+    Pass ?force=true to re-embed ALL saves (fixes saves that had bad metadata when first embedded)."""
     conn = get_conn()
-    rows = conn.execute(
-        "SELECT id, title, description, content FROM saves WHERE embedding IS NULL"
-    ).fetchall()
+    query = "SELECT id, title, description, content FROM saves" if force else \
+            "SELECT id, title, description, content FROM saves WHERE embedding IS NULL"
+    rows = conn.execute(query).fetchall()
     conn.close()
 
     if not rows:
@@ -456,13 +465,12 @@ def backfill_embeddings(background_tasks: BackgroundTasks):
 
 def _row_to_dict(row):
     d = dict(row)
-    try:
-        d["tags"] = json.loads(d.get("tags") or "[]")
-    except Exception:
-        d["tags"] = []
-    try:
-        d["images"] = json.loads(d.get("images") or "[]")
-    except Exception:
-        d["images"] = []
+    for key in ("tags", "images", "topics", "entities"):
+        try:
+            d[key] = json.loads(d.get(key) or "[]")
+        except Exception:
+            d[key] = []
     d.setdefault("price", "")
+    d.setdefault("summary", "")
+    d.pop("embedding", None)  # never send the raw vector to the frontend
     return d

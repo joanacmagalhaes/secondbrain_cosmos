@@ -53,6 +53,8 @@ export default function App() {
   const [showAddModal, setShowAddModal] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const [showUniverse, setShowUniverse] = useState(false)
+  const [selecting, setSelecting] = useState(false)
+  const [selectedIds, setSelectedIds] = useState(new Set())
 
   const fetchSaves = useCallback(async (q = '', type = '') => {
     setLoading(true)
@@ -169,6 +171,28 @@ export default function App() {
     setQuery('')
   }
 
+  const toggleSelect = (id) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+  }
+
+  const exitSelect = () => {
+    setSelecting(false)
+    setSelectedIds(new Set())
+  }
+
+  const handleDeleteSelected = async () => {
+    await Promise.all([...selectedIds].map(id =>
+      fetch(`${API}/saves/${id}`, { method: 'DELETE' })
+    ))
+    setSaves(prev => prev.filter(s => !selectedIds.has(s.id)))
+    fetchTypes()
+    exitSelect()
+  }
+
   return (
     <div className="min-h-screen bg-[#f7f7f8] font-sans">
 
@@ -176,6 +200,11 @@ export default function App() {
       <header className="sticky top-0 z-10 bg-white/90 backdrop-blur border-b border-neutral-100">
         <div className="max-w-7xl mx-auto px-6 py-3 flex items-center gap-4">
           <span className="text-base font-semibold text-violet-600 shrink-0 tracking-tight">secondmind</span>
+          {selecting ? (
+            <span className="flex-1 text-sm text-neutral-500">
+              {selectedIds.size === 0 ? 'Tap items to select' : `${selectedIds.size} selected`}
+            </span>
+          ) : (
           <input
             type="search"
             value={query}
@@ -183,41 +212,59 @@ export default function App() {
             placeholder="Search anything…"
             className="flex-1 bg-neutral-100 rounded-full px-5 py-2 text-sm outline-none focus:ring-2 focus:ring-violet-300 transition placeholder:text-neutral-400"
           />
-          <button
-            onClick={handleRefresh}
-            title="Refresh"
-            className="shrink-0 text-neutral-400 hover:text-violet-600 transition"
-          >
-            <svg
-              viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
-              strokeLinecap="round" strokeLinejoin="round"
-              className={`w-5 h-5 ${refreshing ? 'animate-spin' : ''}`}
+          )}
+          {selecting ? (
+            <button
+              onClick={exitSelect}
+              className="shrink-0 text-sm text-neutral-500 hover:text-neutral-800 transition font-medium"
             >
-              <path d="M23 4v6h-6"/>
-              <path d="M1 20v-6h6"/>
-              <path d="M3.51 9a9 9 0 0114.36-3.36L23 10M1 14l5.13 4.36A9 9 0 0020.49 15"/>
-            </svg>
-          </button>
-          <button
-            onClick={() => setShowUniverse(true)}
-            title="Universe"
-            className="shrink-0 text-neutral-400 hover:text-violet-600 transition"
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5">
-              <circle cx="12" cy="12" r="10"/>
-              <ellipse cx="12" cy="12" rx="4" ry="10" transform="rotate(45 12 12)"/>
-              <circle cx="12" cy="12" r="2.5" fill="currentColor" stroke="none"/>
-              <circle cx="6" cy="7" r="1" fill="currentColor" stroke="none"/>
-              <circle cx="17" cy="16" r="1" fill="currentColor" stroke="none"/>
-              <circle cx="18" cy="7" r="0.8" fill="currentColor" stroke="none"/>
-            </svg>
-          </button>
-          <button
-            onClick={openAdd}
-            className="shrink-0 bg-violet-600 hover:bg-violet-700 text-white text-sm font-medium px-4 py-2 rounded-full transition"
-          >
-            + Save
-          </button>
+              Cancel
+            </button>
+          ) : (
+            <>
+              <button
+                onClick={handleRefresh}
+                title="Refresh"
+                className="shrink-0 text-neutral-400 hover:text-violet-600 transition"
+              >
+                <svg
+                  viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+                  strokeLinecap="round" strokeLinejoin="round"
+                  className={`w-5 h-5 ${refreshing ? 'animate-spin' : ''}`}
+                >
+                  <path d="M23 4v6h-6"/>
+                  <path d="M1 20v-6h6"/>
+                  <path d="M3.51 9a9 9 0 0114.36-3.36L23 10M1 14l5.13 4.36A9 9 0 0020.49 15"/>
+                </svg>
+              </button>
+              <button
+                onClick={() => setShowUniverse(true)}
+                title="Universe"
+                className="shrink-0 text-neutral-400 hover:text-violet-600 transition"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5">
+                  <circle cx="12" cy="12" r="10"/>
+                  <ellipse cx="12" cy="12" rx="4" ry="10" transform="rotate(45 12 12)"/>
+                  <circle cx="12" cy="12" r="2.5" fill="currentColor" stroke="none"/>
+                  <circle cx="6" cy="7" r="1" fill="currentColor" stroke="none"/>
+                  <circle cx="17" cy="16" r="1" fill="currentColor" stroke="none"/>
+                  <circle cx="18" cy="7" r="0.8" fill="currentColor" stroke="none"/>
+                </svg>
+              </button>
+              <button
+                onClick={() => setSelecting(true)}
+                className="shrink-0 text-neutral-400 hover:text-violet-600 transition text-sm font-medium"
+              >
+                Select
+              </button>
+              <button
+                onClick={openAdd}
+                className="shrink-0 bg-violet-600 hover:bg-violet-700 text-white text-sm font-medium px-4 py-2 rounded-full transition"
+              >
+                + Save
+              </button>
+            </>
+          )}
         </div>
 
         {/* Type filter chips */}
@@ -324,11 +371,30 @@ export default function App() {
             <SaveCard
               key={save.id}
               save={save}
-              onClick={() => setSelected(save)}
+              selecting={selecting}
+              isSelected={selectedIds.has(save.id)}
+              onClick={() => selecting ? toggleSelect(save.id) : setSelected(save)}
             />
           ))}
         </div>
       </main>
+
+      {/* Floating delete bar */}
+      {selecting && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-30 flex items-center gap-3 px-5 py-3 rounded-2xl bg-white shadow-xl border border-neutral-100">
+          <span className="text-sm text-neutral-500 min-w-[80px]">
+            {selectedIds.size === 0 ? 'Nothing selected' : `${selectedIds.size} item${selectedIds.size > 1 ? 's' : ''} selected`}
+          </span>
+          <button
+            onClick={handleDeleteSelected}
+            disabled={selectedIds.size === 0}
+            className="px-4 py-1.5 rounded-full text-sm font-medium bg-red-500 hover:bg-red-600 text-white transition disabled:opacity-30 disabled:cursor-not-allowed"
+          >
+            Delete
+          </button>
+        </div>
+      )}
+
       {showUniverse && <Universe onClose={() => setShowUniverse(false)} />}
     </div>
   )

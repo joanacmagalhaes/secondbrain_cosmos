@@ -28,14 +28,27 @@ async function extractMeta() {
         document.querySelector('[data-e2e="video-desc"]') ||
         document.querySelector('[data-e2e="browse-video-desc"]') ||
         document.querySelector('[data-e2e="video-detail-desc"]') ||
-        document.querySelector('[data-e2e="search-video-desc"]')
+        document.querySelector('[data-e2e="search-video-desc"]') ||
+        document.querySelector('h1[data-e2e]')
+
+      // Detect when og:title/og:description is TikTok profile metadata, not video content.
+      // Profile metadata contains patterns like "388 Likes. 30 Followers." or "Try again. Watch the latest video"
+      var ttIsProfileMeta = /\d+\s*(Likes?|Followers?)\s*[.·]/.test(ogDesc) ||
+                            /Try again[\.\s]+Watch the latest/i.test(ogDesc) ||
+                            /Try again[\.\s]+Watch the latest/i.test(ogTitle)
 
       if (ttDescEl && ttDescEl.innerText && ttDescEl.innerText.trim().length > 2) {
         var ttRaw = ttDescEl.innerText.trim()
         ogTitle = ttRaw.split('\n')[0].slice(0, 120)
         ogDesc  = ttRaw
-      } else if (ogDesc && ogDesc.length > 5) {
+      } else if (ogDesc && ogDesc.length > 5 && !ttIsProfileMeta) {
         ogTitle = ogDesc.split('\n')[0].slice(0, 120) || ogTitle
+      } else {
+        // No real caption — build a clean title from the creator handle in the URL
+        var ttCreatorMatch = window.location.pathname.match(/^\/([@\w.]+)/)
+        var ttCreator = ttCreatorMatch ? ttCreatorMatch[1] : ''
+        ogTitle = ttCreator ? ttCreator + ' on TikTok' : 'TikTok video'
+        ogDesc  = ''
       }
 
       // Thumbnail: TikTok videos have no poster attribute and og:image is stale (profile pic).

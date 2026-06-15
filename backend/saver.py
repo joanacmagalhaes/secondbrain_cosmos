@@ -66,7 +66,8 @@ def init_db():
             created_at TEXT
         )
     """)
-    for col in ("content TEXT", "type TEXT", "images TEXT", "price TEXT", "embedding TEXT"):
+    for col in ("content TEXT", "type TEXT", "images TEXT", "price TEXT", "embedding TEXT",
+                 "summary TEXT", "topics TEXT", "entities TEXT"):
         try:
             conn.execute(f"ALTER TABLE saves ADD COLUMN {col}")
         except Exception:
@@ -318,6 +319,73 @@ def get_embedding(title: str, description: str, content: str = "") -> list[float
         return []
 
 
+def get_summary(title: str, description: str, content: str = "") -> str:
+    """Generate a single concise sentence summarising the saved item."""
+    context = f"Title: {title}\nDescription: {description[:300]}"
+    if content:
+        context += f"\nContent snippet: {content[:400]}"
+    prompt = (
+        f"{context}\n\n"
+        "Write one concise sentence (under 20 words) describing what this item is. "
+        "Reply with ONLY the sentence, no quotes."
+    )
+    try:
+        res = requests.post(OLLAMA_URL, json={
+            "model": OLLAMA_MODEL, "prompt": prompt, "stream": False,
+        }, timeout=30)
+        return res.json().get("response", "").strip().strip('"').strip("'")
+    except Exception as e:
+        print(f"Summary failed: {e}")
+        return ""
+
+
+def get_topics(title: str, description: str) -> list:
+    """Generate up to 3 broad, high-level topics for the saved item."""
+    prompt = (
+        f"Title: {title}\nDescription: {description[:300]}\n\n"
+        "List 1-3 broad, high-level topics for this item.\n"
+        "Topics must be broad categories like 'Film Photography', 'Software Engineering', 'Street Fashion'.\n"
+        "NOT specific tags like 'leica', 'python', 'hoodie'.\n"
+        "Reply with ONLY a JSON array. Example: [\"Film Photography\", \"Camera Gear\"]"
+    )
+    try:
+        res = requests.post(OLLAMA_URL, json={
+            "model": OLLAMA_MODEL, "prompt": prompt, "stream": False,
+        }, timeout=30)
+        text = res.json().get("response", "").strip()
+        start, end = text.find("["), text.rfind("]") + 1
+        if start != -1 and end > start:
+            return [str(t).strip() for t in json.loads(text[start:end]) if t][:3]
+        return []
+    except Exception as e:
+        print(f"Topics failed: {e}")
+        return []
+
+
+def get_entities(title: str, description: str, content: str = "") -> list:
+    """Extract named entities (products, people, places, brands) from the saved item."""
+    context = f"Title: {title}\nDescription: {description[:300]}"
+    prompt = (
+        f"{context}\n\n"
+        "Extract named entities explicitly mentioned: products, people, places, brands, or technologies.\n"
+        "Return an empty array [] if none are clearly mentioned.\n"
+        "Maximum 5 entities. No generic words.\n"
+        "Reply with ONLY a JSON array. Example: [\"Leica M6\", \"Daido Moriyama\", \"Porto\"]"
+    )
+    try:
+        res = requests.post(OLLAMA_URL, json={
+            "model": OLLAMA_MODEL, "prompt": prompt, "stream": False,
+        }, timeout=30)
+        text = res.json().get("response", "").strip()
+        start, end = text.find("["), text.rfind("]") + 1
+        if start != -1 and end > start:
+            return [str(e).strip() for e in json.loads(text[start:end]) if e][:5]
+        return []
+    except Exception as e:
+        print(f"Entities failed: {e}")
+        return []
+
+
 def _cosine_sim(a: list, b: list) -> float:
     dot = sum(x * y for x, y in zip(a, b))
     mag_a = sum(x * x for x in a) ** 0.5
@@ -364,14 +432,34 @@ def _kmeans(embeddings: list, k: int, max_iter: int = 20) -> list:
 
 
 def name_cluster(items: list) -> str:
-    """Ask Ollama to name a cluster. items = list of (title, description) tuples."""
+    """Name a cluster using topic frequency first, Ollama fallback for sparse topics."""
+    # Collect all topics across items; each item is (title, description, topics_list)
+    from collections import Counter
+    topic_counts = Counter()
+    for entry in items:
+        topics = entry[2] if len(entry) > 2 else []
+        for t in topics:
+            if t:
+                topic_counts[t.strip()] += 1
+
+    if topic_counts:
+        top = topic_counts.most_common(1)[0][0]
+        return top
+
+    # Fallback: ask Ollama when no topics are available
     lines = '\n'.join(
         f'- "{t}"' + (f' — {d[:120]}' if d else '')
-        for t, d in items[:5]
+        for t, d, *_ in items[:5]
     )
     prompt = (
-        f"A user saved these items:\n{lines}\n\n"
-        "Give this collection a short, evocative name (2-4 words). "
+        f"A user saved these items together:\n{lines}\n\n"
+        "What is the single broadest theme that ALL of these items share?\n"
+        "Rules:\n"
+        "- Focus on what every item has in common, not what makes one item unique\n"
+        "- Use a broad category name, not a specific detail from one item\n"
+        "- Good: 'Travel', 'Food & Cooking', 'Tech & Dev', 'Fashion'\n"
+        "- Bad: 'Traveling in Lisbon' (too specific), 'Digital Detritus' (too vague)\n"
+        "- 1-3 words maximum\n"
         "Reply with ONLY the name, no quotes, no punctuation."
     )
     try:
@@ -387,37 +475,60 @@ def name_cluster(items: list) -> str:
         return "Collection"
 
 
+def _kmeans_score(embeddings: list, labels: list) -> float:
+    """Average intra-cluster cosine similarity — higher is better."""
+    from collections import defaultdict
+    groups = defaultdict(list)
+    for i, l in enumerate(labels):
+        groups[l].append(embeddings[i])
+    total, count = 0.0, 0
+    for members in groups.values():
+        if len(members) < 2:
+            continue
+        dim = len(members[0])
+        centroid = [sum(m[d] for m in members) / len(members) for d in range(dim)]
+        for m in members:
+            total += _cosine_sim(m, centroid)
+            count += 1
+    return total / count if count else 0.0
+
+
 def generate_clusters(conn) -> list:
-    """Run k-means on all embedded saves and name each cluster via Ollama."""
+    """Group saves by primary topic. Each unique topic is its own cluster.
+    Only saves with no topics at all fall back to embedding-based assignment."""
     rows = conn.execute(
-        "SELECT id, title, description, embedding FROM saves WHERE embedding IS NOT NULL"
+        "SELECT id, embedding, topics FROM saves WHERE embedding IS NOT NULL"
     ).fetchall()
 
     if len(rows) < 3:
         return []
 
-    ids = [r[0] for r in rows]
-    titles = [r[1] or "" for r in rows]
-    descriptions = [r[2] or "" for r in rows]
-    embeddings = [json.loads(r[3]) for r in rows]
+    ids         = [r[0] for r in rows]
+    embeddings  = [json.loads(r[1]) for r in rows]
+    topics_list = [json.loads(r[2]) if r[2] else [] for r in rows]
 
-    k = max(3, min(6, len(rows) // 4))
-    labels = _kmeans(embeddings, k)
+    topic_groups: dict[str, list] = {}
+    no_topic: list = []
 
-    groups: dict[int, list] = {}
-    for i, label in enumerate(labels):
-        groups.setdefault(label, []).append(i)
+    for i, topics in enumerate(topics_list):
+        if topics:
+            topic_groups.setdefault(topics[0], []).append(i)
+        else:
+            no_topic.append(i)
 
-    result = []
-    for label, indices in groups.items():
-        embs = [embeddings[i] for i in indices]
-        dim = len(embs[0])
-        centroid = [sum(e[d] for e in embs) / len(embs) for d in range(dim)]
-        sorted_idx = sorted(indices, key=lambda i: _cosine_sim(embeddings[i], centroid), reverse=True)
-        name = name_cluster([(titles[i], descriptions[i]) for i in sorted_idx[:5]])
-        result.append({"name": name, "item_ids": [ids[i] for i in indices]})
+    # Only saves with truly missing topics fall back to embedding distance
+    if no_topic and topic_groups:
+        def _centroid(idxs):
+            embs = [embeddings[i] for i in idxs]
+            dim  = len(embs[0])
+            return [sum(e[d] for e in embs) / len(embs) for d in range(dim)]
+        centroids = {t: _centroid(idxs) for t, idxs in topic_groups.items()}
+        for i in no_topic:
+            best = max(centroids, key=lambda t: _cosine_sim(embeddings[i], centroids[t]))
+            topic_groups[best].append(i)
 
-    return result
+    return [{"name": name, "item_ids": [ids[i] for i in idxs]}
+            for name, idxs in topic_groups.items()]
 
 
 def get_all_tags(title: str, description: str, image_source: str = "") -> list:

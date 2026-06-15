@@ -10,9 +10,9 @@ const TYPE_LABELS = {
 }
 
 export default function SaveDetail({ save, onClose, onUpdate, onDelete }) {
-  const [tags, setTags] = useState(save.tags)
-  const [tagInput, setTagInput] = useState('')
-  const [editingTags, setEditingTags] = useState(false)
+  const [summary, setSummary]   = useState(save.summary || '')
+  const [topics, setTopics]     = useState(Array.isArray(save.topics) ? save.topics : [])
+  const [entities, setEntities] = useState(Array.isArray(save.entities) ? save.entities : [])
   const [notes, setNotes] = useState(save.notes || '')
   const [editingNotes, setEditingNotes] = useState(false)
   const [imgIndex, setImgIndex] = useState(0)
@@ -25,44 +25,22 @@ export default function SaveDetail({ save, onClose, onUpdate, onDelete }) {
     ? new Date(save.created_at).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })
     : ''
 
+  // Poll while the background pipeline hasn't run yet (brand-new save)
   useEffect(() => {
-    if (tags.length > 0) return
+    if (save.tags?.length > 0) return
     const interval = setInterval(async () => {
       const res = await fetch(`${API}/saves/${save.id}`)
       if (!res.ok) return
       const updated = await res.json()
-      if (updated.tags.length > 0) {
-        setTags(updated.tags)
+      if (updated.tags?.length > 0) {
+        setSummary(updated.summary || '')
+        setTopics(updated.topics || [])
+        setEntities(updated.entities || [])
         clearInterval(interval)
       }
     }, 4000)
     return () => clearInterval(interval)
-  }, [save.id, tags.length])
-
-  const addTag = async (raw) => {
-    const newTag = raw.trim().replace(/^#/, '')
-    if (!newTag || tags.includes(newTag)) return
-    const newTags = [...tags, newTag]
-    await fetch(`${API}/saves/${save.id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tags: newTags }),
-    })
-    setTags(newTags)
-    setTagInput('')
-    onUpdate(save.id, { tags: newTags })
-  }
-
-  const removeTag = async (tag) => {
-    const newTags = tags.filter(t => t !== tag)
-    await fetch(`${API}/saves/${save.id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tags: newTags }),
-    })
-    setTags(newTags)
-    onUpdate(save.id, { tags: newTags })
-  }
+  }, [save.id, save.tags?.length])
 
   const saveNotes = async () => {
     await fetch(`${API}/saves/${save.id}`, {
@@ -125,7 +103,7 @@ export default function SaveDetail({ save, onClose, onUpdate, onDelete }) {
             </div>
           </div>
 
-          {/* Hero: left (title + tags + desc) | right (image) */}
+          {/* Hero: left (title + topics + summary + desc) | right (image) */}
           <div className="px-10 py-8 grid grid-cols-3 gap-10 items-start">
 
             {/* Left */}
@@ -134,44 +112,30 @@ export default function SaveDetail({ save, onClose, onUpdate, onDelete }) {
                 {save.title || hostname}
               </h1>
 
-              {/* Tags */}
-              <div className="flex flex-wrap gap-2 items-center">
-                {tags.length === 0 && (
-                  <span className="text-xs text-neutral-400 italic animate-pulse">tagging…</span>
-                )}
-                {tags.map(tag => (
-                  <button
-                    key={tag}
-                    onClick={() => removeTag(tag)}
-                    className="group flex items-center gap-1 text-sm px-3 py-1 rounded-full bg-violet-100 text-violet-700 font-medium hover:bg-red-50 hover:text-red-500 transition-colors"
-                    title="Click to remove"
-                  >
-                    #{tag}
-                    <span className="opacity-0 group-hover:opacity-100 text-xs leading-none">×</span>
-                  </button>
-                ))}
-                {editingTags ? (
-                  <input
-                    autoFocus
-                    value={tagInput}
-                    onChange={e => setTagInput(e.target.value)}
-                    onKeyDown={e => {
-                      if (e.key === 'Enter') { addTag(tagInput); }
-                      if (e.key === 'Escape') { setEditingTags(false); setTagInput(''); }
-                    }}
-                    onBlur={() => { if (tagInput) addTag(tagInput); setEditingTags(false); setTagInput(''); }}
-                    placeholder="add tag"
-                    className="text-sm px-3 py-1 rounded-full border border-violet-300 outline-none focus:border-violet-500 w-24 bg-white"
-                  />
-                ) : (
-                  <button
-                    onClick={() => setEditingTags(true)}
-                    className="w-7 h-7 rounded-full border border-neutral-300 text-neutral-400 hover:border-violet-400 hover:text-violet-500 flex items-center justify-center text-lg leading-none transition-colors"
-                  >+</button>
-                )}
-              </div>
+              {/* Topics */}
+              {topics.length > 0 ? (
+                <div className="flex flex-wrap gap-2">
+                  {topics.map(topic => (
+                    <span
+                      key={topic}
+                      className="text-xs px-3 py-1 rounded-full bg-neutral-100 text-neutral-500 font-medium"
+                    >
+                      {topic}
+                    </span>
+                  ))}
+                </div>
+              ) : save.tags?.length === 0 && (
+                <span className="text-xs text-neutral-400 italic animate-pulse">analysing…</span>
+              )}
 
-              {/* Description */}
+              {/* AI Summary */}
+              {summary && (
+                <p className="text-sm text-neutral-500 italic leading-relaxed">
+                  {summary}
+                </p>
+              )}
+
+              {/* Scraped description */}
               {save.description && (
                 <p className="text-neutral-600 leading-relaxed text-base">
                   {save.description}
@@ -273,6 +237,21 @@ export default function SaveDetail({ save, onClose, onUpdate, onDelete }) {
                     {hostname} ↗
                   </a>
                 </div>
+                {entities.length > 0 && (
+                  <div className="flex flex-col gap-2 pt-1">
+                    <span className="text-neutral-400 text-sm">Entities</span>
+                    <div className="flex flex-wrap gap-1.5">
+                      {entities.map(e => (
+                        <span
+                          key={e}
+                          className="text-xs px-2 py-0.5 rounded-md bg-neutral-50 text-neutral-600 border border-neutral-200"
+                        >
+                          {e}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
 
