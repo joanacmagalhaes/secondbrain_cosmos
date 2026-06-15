@@ -1,6 +1,11 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 
 const API = 'http://localhost:8000'
+
+const PALETTE = [
+  '#AFC8E8', '#E8B8C4', '#C4B8E8', '#E8CDB8',
+  '#B8D8C4', '#D4C4A8', '#E8D8A8', '#C8B8D4',
+]
 
 const TYPE_LABELS = {
   YouTube: 'YouTube', Instagram: 'Instagram', InstagramVideo: 'Instagram Reel',
@@ -16,6 +21,14 @@ export default function SaveDetail({ save, onClose, onUpdate, onDelete }) {
   const [notes, setNotes] = useState(save.notes || '')
   const [editingNotes, setEditingNotes] = useState(false)
   const [imgIndex, setImgIndex] = useState(0)
+  const [saveCollections, setSaveCollections] = useState([])
+  const [allCollections, setAllCollections] = useState([])
+  const [showCollectionDropdown, setShowCollectionDropdown] = useState(false)
+  const [showNewCollForm, setShowNewCollForm] = useState(false)
+  const [newCollName, setNewCollName] = useState('')
+  const [newCollColor, setNewCollColor] = useState(PALETTE[0])
+  const [creatingColl, setCreatingColl] = useState(false)
+  const collectionDropdownRef = useRef(null)
   const carouselImages = save.images?.length > 1 ? save.images : (save.image ? [save.image] : [])
 
   let hostname = ''
@@ -41,6 +54,69 @@ export default function SaveDetail({ save, onClose, onUpdate, onDelete }) {
     }, 4000)
     return () => clearInterval(interval)
   }, [save.id, save.tags?.length])
+
+  useEffect(() => {
+    fetch(`${API}/saves/${save.id}/collections`)
+      .then(r => r.json())
+      .then(data => setSaveCollections(data))
+      .catch(() => {})
+  }, [save.id])
+
+  useEffect(() => {
+    if (!showCollectionDropdown) return
+    const handler = (e) => {
+      if (collectionDropdownRef.current && !collectionDropdownRef.current.contains(e.target)) {
+        setShowCollectionDropdown(false)
+        setShowNewCollForm(false)
+        setNewCollName('')
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [showCollectionDropdown])
+
+  const loadAllCollections = async () => {
+    if (allCollections.length > 0) return
+    const res = await fetch(`${API}/collections`)
+    if (res.ok) setAllCollections(await res.json())
+  }
+
+  const addToCollection = async (collection) => {
+    await fetch(`${API}/collections/${collection.id}/items`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ save_ids: [save.id] }),
+    })
+    setSaveCollections(prev => [...prev, collection])
+    setShowCollectionDropdown(false)
+  }
+
+  const createCollAndAddToSave = async () => {
+    if (!newCollName.trim()) return
+    setCreatingColl(true)
+    try {
+      const res = await fetch(`${API}/collections`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: newCollName.trim(), color: newCollColor }),
+      })
+      if (!res.ok) return
+      const coll = await res.json()
+      await fetch(`${API}/collections/${coll.id}/items`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ save_ids: [save.id] }),
+      })
+      setSaveCollections(prev => [...prev, { id: coll.id, name: coll.name, color: coll.color }])
+      setAllCollections(prev => [coll, ...prev])
+      setShowCollectionDropdown(false)
+      setShowNewCollForm(false)
+      setNewCollName('')
+      setNewCollColor(PALETTE[0])
+    } finally {
+      setCreatingColl(false)
+    }
+  }
 
   const saveNotes = async () => {
     await fetch(`${API}/saves/${save.id}`, {
@@ -283,10 +359,94 @@ export default function SaveDetail({ save, onClose, onUpdate, onDelete }) {
               )}
             </div>
 
-            {/* Collections — placeholder for future */}
-            <div className="bg-white rounded-2xl p-5 opacity-50 select-none">
-              <p className="text-sm font-semibold text-neutral-900 mb-4">Collections</p>
-              <p className="text-sm text-neutral-400">Coming soon</p>
+            {/* Collections */}
+            <div className="bg-white rounded-2xl p-5 flex flex-col gap-3">
+              <p className="text-sm font-semibold text-neutral-900">Collections</p>
+              <div className="flex flex-wrap gap-2 items-center">
+                {saveCollections.map(c => (
+                  <span
+                    key={c.id}
+                    className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full"
+                    style={{ background: c.color + '40' }}
+                  >
+                    <span className="w-2 h-2 rounded-full shrink-0" style={{ background: c.color }} />
+                    <span className="text-neutral-700">{c.name}</span>
+                  </span>
+                ))}
+                <div className="relative" ref={collectionDropdownRef}>
+                  <button
+                    onClick={() => { setShowCollectionDropdown(p => !p); loadAllCollections() }}
+                    className="text-xs px-2.5 py-1 rounded-full border border-dashed border-neutral-300 text-neutral-400 hover:border-neutral-400 hover:text-neutral-600 transition-colors"
+                  >
+                    + Add
+                  </button>
+                  {showCollectionDropdown && (
+                    <div className="absolute bottom-full left-0 mb-2 bg-white rounded-xl shadow-lg border border-neutral-100 py-1.5 z-10 min-w-[190px]">
+                      {allCollections
+                        .filter(c => !saveCollections.find(sc => sc.id === c.id))
+                        .map(c => (
+                          <button
+                            key={c.id}
+                            onClick={() => addToCollection(c)}
+                            className="flex items-center gap-2.5 w-full text-left text-xs px-3 py-1.5 hover:bg-neutral-50 transition-colors"
+                          >
+                            <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: c.color }} />
+                            <span className="text-neutral-700">{c.name}</span>
+                          </button>
+                        ))
+                      }
+
+                      {showNewCollForm ? (
+                        <div className="px-3 py-2 flex flex-col gap-2 border-t border-neutral-100 mt-1">
+                          <input
+                            type="text"
+                            value={newCollName}
+                            onChange={e => setNewCollName(e.target.value)}
+                            onKeyDown={e => e.key === 'Enter' && createCollAndAddToSave()}
+                            placeholder="Name…"
+                            autoFocus
+                            className="text-xs outline-none border border-neutral-200 rounded-lg px-2 py-1.5 focus:ring-2 focus:ring-violet-400 w-full"
+                          />
+                          <div className="flex flex-wrap gap-1.5">
+                            {PALETTE.map(c => (
+                              <button
+                                key={c}
+                                type="button"
+                                onClick={() => setNewCollColor(c)}
+                                className="w-4 h-4 rounded-full transition-all"
+                                style={{
+                                  background: c,
+                                  transform: newCollColor === c ? 'scale(1.3)' : 'scale(1)',
+                                  boxShadow: newCollColor === c ? `0 0 0 1.5px white, 0 0 0 3px ${c}` : 'none',
+                                }}
+                              />
+                            ))}
+                          </div>
+                          <div className="flex gap-1.5 justify-end">
+                            <button
+                              onClick={() => { setShowNewCollForm(false); setNewCollName('') }}
+                              className="text-[11px] text-neutral-400 hover:text-neutral-600 px-2 py-1 rounded-md transition"
+                            >Cancel</button>
+                            <button
+                              onClick={createCollAndAddToSave}
+                              disabled={creatingColl || !newCollName.trim()}
+                              className="text-[11px] bg-violet-600 hover:bg-violet-700 text-white px-2 py-1 rounded-md transition disabled:opacity-40"
+                            >{creatingColl ? '…' : 'Create'}</button>
+                          </div>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => setShowNewCollForm(true)}
+                          className="flex items-center gap-1.5 w-full text-xs px-3 py-1.5 text-neutral-400 hover:text-violet-600 transition-colors border-t border-neutral-100 mt-1"
+                        >
+                          <span className="text-sm font-light leading-none">+</span>
+                          New collection
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
 
           </div>

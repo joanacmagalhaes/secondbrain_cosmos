@@ -6,6 +6,11 @@ import Collections from './Collections'
 
 const API = 'http://localhost:8000'
 
+const PALETTE = [
+  '#AFC8E8', '#E8B8C4', '#C4B8E8', '#E8CDB8',
+  '#B8D8C4', '#D4C4A8', '#E8D8A8', '#C8B8D4',
+]
+
 const TYPE_ICONS = {
   YouTube: '▶',
   Instagram: '📷',
@@ -62,6 +67,10 @@ export default function App() {
   const [showCollections, setShowCollections] = useState(false)
   const [showAddToCollection, setShowAddToCollection] = useState(false)
   const [allCollections, setAllCollections] = useState([])
+  const [showNewCollInline, setShowNewCollInline] = useState(false)
+  const [newCollName, setNewCollName] = useState('')
+  const [newCollColor, setNewCollColor] = useState(PALETTE[0])
+  const [creatingColl, setCreatingColl] = useState(false)
   const [view, setView] = useState(() => localStorage.getItem('sm-view') || 'masonry')
   const uploadInputRef = useRef(null)
 
@@ -249,6 +258,36 @@ export default function App() {
       setError('Cannot reach backend.')
     } finally {
       setAdding(false)
+    }
+  }
+
+  const closeAddToCollection = () => {
+    setShowAddToCollection(false)
+    setShowNewCollInline(false)
+    setNewCollName('')
+    setNewCollColor(PALETTE[0])
+  }
+
+  const createCollAndAdd = async () => {
+    if (!newCollName.trim()) return
+    setCreatingColl(true)
+    try {
+      const res = await fetch(`${API}/collections`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: newCollName.trim(), color: newCollColor }),
+      })
+      if (!res.ok) return
+      const coll = await res.json()
+      await fetch(`${API}/collections/${coll.id}/items`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ save_ids: [...selectedIds] }),
+      })
+      closeAddToCollection()
+      exitSelect()
+    } finally {
+      setCreatingColl(false)
     }
   }
 
@@ -652,14 +691,13 @@ export default function App() {
       {/* Add to Collection modal */}
       {showAddToCollection && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
-             onClick={() => setShowAddToCollection(false)}>
+             onClick={closeAddToCollection}>
           <div onClick={e => e.stopPropagation()}
-               className="bg-white rounded-3xl w-full max-w-sm p-5 shadow-2xl flex flex-col gap-4">
+               className="bg-white rounded-3xl w-full max-w-sm p-5 shadow-2xl flex flex-col gap-3">
             <h2 className="text-base font-semibold text-neutral-900">Add to Collection</h2>
-            {allCollections.length === 0 ? (
-              <p className="text-sm text-neutral-400 text-center py-4">No collections yet. Create one first.</p>
-            ) : (
-              <div className="flex flex-col gap-1 max-h-72 overflow-y-auto">
+
+            {allCollections.length > 0 && (
+              <div className="flex flex-col gap-1 max-h-60 overflow-y-auto">
                 {allCollections.map(c => (
                   <button
                     key={c.id}
@@ -669,7 +707,7 @@ export default function App() {
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ save_ids: [...selectedIds] }),
                       })
-                      setShowAddToCollection(false)
+                      closeAddToCollection()
                       exitSelect()
                     }}
                     className="flex items-center gap-3 px-4 py-3 rounded-2xl hover:bg-neutral-50 transition text-left"
@@ -683,8 +721,57 @@ export default function App() {
                 ))}
               </div>
             )}
-            <button onClick={() => setShowAddToCollection(false)}
-              className="text-sm text-neutral-400 hover:text-neutral-600 transition text-center">
+
+            {showNewCollInline ? (
+              <div className="flex flex-col gap-3 border border-neutral-100 rounded-2xl p-4">
+                <input
+                  type="text"
+                  value={newCollName}
+                  onChange={e => setNewCollName(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && createCollAndAdd()}
+                  placeholder="Collection name…"
+                  autoFocus
+                  className="text-sm outline-none border border-neutral-200 rounded-xl px-3 py-2 focus:ring-2 focus:ring-violet-400"
+                />
+                <div className="flex flex-wrap gap-2">
+                  {PALETTE.map(c => (
+                    <button
+                      key={c}
+                      type="button"
+                      onClick={() => setNewCollColor(c)}
+                      className="w-6 h-6 rounded-full transition-all"
+                      style={{
+                        background: c,
+                        transform: newCollColor === c ? 'scale(1.25)' : 'scale(1)',
+                        boxShadow: newCollColor === c ? `0 0 0 2px white, 0 0 0 3.5px ${c}` : 'none',
+                      }}
+                    />
+                  ))}
+                </div>
+                <div className="flex gap-2 justify-end">
+                  <button
+                    onClick={() => { setShowNewCollInline(false); setNewCollName('') }}
+                    className="text-xs text-neutral-400 hover:text-neutral-600 px-3 py-1.5 rounded-lg transition"
+                  >Cancel</button>
+                  <button
+                    onClick={createCollAndAdd}
+                    disabled={creatingColl || !newCollName.trim()}
+                    className="text-xs bg-violet-600 hover:bg-violet-700 text-white px-3 py-1.5 rounded-lg transition disabled:opacity-40"
+                  >{creatingColl ? 'Creating…' : 'Create & Add'}</button>
+                </div>
+              </div>
+            ) : (
+              <button
+                onClick={() => setShowNewCollInline(true)}
+                className="flex items-center gap-2 text-sm text-neutral-500 hover:text-violet-600 transition px-1 py-1"
+              >
+                <span className="text-lg font-light leading-none">+</span>
+                New collection
+              </button>
+            )}
+
+            <button onClick={closeAddToCollection}
+              className="text-sm text-neutral-400 hover:text-neutral-600 transition text-center pt-1">
               Cancel
             </button>
           </div>

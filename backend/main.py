@@ -671,6 +671,19 @@ def remove_from_collection(coll_id: int, save_id: int):
     conn.close()
 
 
+@app.get("/saves/{save_id}/collections")
+def get_save_collections(save_id: int):
+    conn = get_conn()
+    rows = conn.execute(
+        "SELECT c.id, c.name, c.color FROM collection_items ci "
+        "JOIN collections c ON c.id = ci.collection_id "
+        "WHERE ci.save_id = ? ORDER BY ci.added_at DESC",
+        (save_id,),
+    ).fetchall()
+    conn.close()
+    return [{"id": r["id"], "name": r["name"], "color": r["color"]} for r in rows]
+
+
 def _row_to_dict(row):
     d = dict(row)
     for key in ("tags", "images", "topics", "entities"):
