@@ -17,13 +17,19 @@ const TYPE_ICONS = {
   Recipe:    '⬡',
   Product:   '◻',
   Article:   '◈',
+  Note:      '✎',
+  Image:     '◼',
 }
 
 export default function SaveCard({ save, onClick, selecting = false, isSelected = false }) {
   const [imgError, setImgError] = useState(false)
 
   let hostname = ''
-  try { hostname = new URL(save.url).hostname.replace('www.', '') } catch {}
+  if (save.url?.startsWith('note://') || save.url?.startsWith('upload://')) {
+    hostname = ''
+  } else {
+    try { hostname = new URL(save.url).hostname.replace('www.', '') } catch {}
+  }
 
   const icon     = TYPE_ICONS[save.type] || null
   const hasImage = !!save.image && !imgError

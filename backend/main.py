@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException, BackgroundTasks, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -7,6 +7,7 @@ import sqlite3
 import json
 import os
 import hashlib
+import uuid
 import requests as http_requests
 from saver import (init_db, scrape, get_all_tags, get_embedding,
                    get_summary, get_topics, get_entities,
@@ -38,6 +39,11 @@ class SaveRequest(BaseModel):
     provided_type: str = ""
     provided_price: str = ""
     is_video: bool = False
+
+
+class NoteRequest(BaseModel):
+    title: str = ""
+    content: str = ""
 
 
 class UpdateRequest(BaseModel):
@@ -152,6 +158,64 @@ def create_save(body: SaveRequest, background_tasks: BackgroundTasks):
     conn.close()
 
     background_tasks.add_task(_tag_and_update, dict(row)["id"], title, description, meta["type"], raw_images, body.url)
+
+    return _row_to_dict(row)
+
+
+@app.post("/notes", status_code=201)
+def create_note(body: NoteRequest, background_tasks: BackgroundTasks):
+    title   = body.title.strip() or "Untitled note"
+    content = body.content.strip()
+    note_url = f"note://{uuid.uuid4()}"
+
+    conn = get_conn()
+    conn.execute(
+        "INSERT INTO saves (url, title, description, image, tags, notes, content, type, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (note_url, title, content, "", "[]", "", content, "Note",
+         datetime.now(timezone.utc).isoformat()),
+    )
+    conn.commit()
+    row = conn.execute("SELECT * FROM saves WHERE url = ?", (note_url,)).fetchone()
+    conn.close()
+
+    save_id = dict(row)["id"]
+    # Pass content as description so the AI pipeline has full context
+    background_tasks.add_task(_tag_and_update, save_id, title, content, "Note", [], "")
+
+    return _row_to_dict(row)
+
+
+@app.post("/uploads", status_code=201)
+async def upload_image(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
+    if file.content_type not in ("image/png", "image/jpeg"):
+        raise HTTPException(status_code=422, detail="Only PNG and JPG files are supported")
+
+    data = await file.read()
+    ext = "png" if file.content_type == "image/png" else "jpg"
+    filename = hashlib.md5(data).hexdigest() + "." + ext
+    filepath = os.path.join(IMAGES_DIR, filename)
+    if not os.path.exists(filepath):
+        with open(filepath, "wb") as f:
+            f.write(data)
+
+    local_url = f"{IMAGE_BASE_URL}/images/{filename}"
+    upload_url = f"upload://{uuid.uuid4()}"
+    title = file.filename or "Uploaded image"
+
+    conn = get_conn()
+    conn.execute(
+        "INSERT INTO saves (url, title, description, image, tags, notes, content, type, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (upload_url, title, "", local_url, "[]", "", "", "Image",
+         datetime.now(timezone.utc).isoformat()),
+    )
+    conn.commit()
+    row = conn.execute("SELECT * FROM saves WHERE url = ?", (upload_url,)).fetchone()
+    conn.close()
+
+    save_id = dict(row)["id"]
+    background_tasks.add_task(_tag_and_update, save_id, title, "", "Image", [], "")
 
     return _row_to_dict(row)
 

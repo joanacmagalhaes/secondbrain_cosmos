@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import SaveCard from './SaveCard'
 import SaveDetail from './SaveDetail'
 import Universe from './Universe'
@@ -46,6 +46,9 @@ export default function App() {
   const [query, setQuery] = useState('')
   const [urlInput, setUrlInput] = useState('')
   const [notesInput, setNotesInput] = useState('')
+  const [saveTab, setSaveTab] = useState('link')
+  const [noteTitle, setNoteTitle] = useState('')
+  const [noteContent, setNoteContent] = useState('')
   const [adding, setAdding] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -53,6 +56,9 @@ export default function App() {
   const [showAddModal, setShowAddModal] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const [showUniverse, setShowUniverse] = useState(false)
+  const [showSaveMenu, setShowSaveMenu] = useState(false)
+  const [showNoteEditor, setShowNoteEditor] = useState(false)
+  const uploadInputRef = useRef(null)
   const [selecting, setSelecting] = useState(false)
   const [selectedIds, setSelectedIds] = useState(new Set())
 
@@ -123,31 +129,114 @@ export default function App() {
   }, [saves.length, query, activeType, fetchSaves, fetchTypes])
 
   const openAdd = () => { setError(''); setShowAddModal(true) }
-  const closeAdd = () => { setShowAddModal(false); setError('') }
+  const closeAdd = () => {
+    setShowAddModal(false)
+    setError('')
+    setSaveTab('link')
+    setNoteTitle('')
+    setNoteContent('')
+  }
 
-  const handleAdd = async (e) => {
-    e.preventDefault()
-    if (!urlInput.trim()) return
+  const closeNoteEditor = () => {
+    setShowNoteEditor(false)
+    setError('')
+    setNoteTitle('')
+    setNoteContent('')
+  }
+
+  const handleSaveNote = async () => {
+    if (!noteContent.trim() && !noteTitle.trim()) return
     setAdding(true)
     setError('')
     try {
-      const res = await fetch(`${API}/saves`, {
+      const res = await fetch(`${API}/notes`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: urlInput.trim(), notes: notesInput.trim() }),
+        body: JSON.stringify({ title: noteTitle.trim(), content: noteContent.trim() }),
       })
-      if (res.status === 409) {
-        setError('Already saved!')
-      } else if (!res.ok) {
+      if (!res.ok) {
         const err = await res.json()
         setError(err.detail || 'Something went wrong.')
       } else {
         const newSave = await res.json()
         setSaves(prev => [newSave, ...prev])
         fetchTypes()
-        setUrlInput('')
-        setNotesInput('')
-        closeAdd()
+        closeNoteEditor()
+      }
+    } catch {
+      setError('Cannot reach backend.')
+    } finally {
+      setAdding(false)
+    }
+  }
+
+  const handleUpload = async (e) => {
+    const file = e.target.files[0]
+    if (!file) return
+    setAdding(true)
+    const formData = new FormData()
+    formData.append('file', file)
+    try {
+      const res = await fetch(`${API}/uploads`, { method: 'POST', body: formData })
+      if (!res.ok) {
+        const err = await res.json()
+        setError(err.detail || 'Upload failed.')
+      } else {
+        const newSave = await res.json()
+        setSaves(prev => [newSave, ...prev])
+        fetchTypes()
+      }
+    } catch {
+      setError('Upload failed.')
+    } finally {
+      setAdding(false)
+      e.target.value = ''
+    }
+  }
+
+  const handleAdd = async (e) => {
+    e.preventDefault()
+    setAdding(true)
+    setError('')
+    try {
+      if (saveTab === 'note') {
+        if (!noteContent.trim() && !noteTitle.trim()) return
+        const res = await fetch(`${API}/notes`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title: noteTitle.trim(), content: noteContent.trim() }),
+        })
+        if (!res.ok) {
+          const err = await res.json()
+          setError(err.detail || 'Something went wrong.')
+        } else {
+          const newSave = await res.json()
+          setSaves(prev => [newSave, ...prev])
+          fetchTypes()
+          setNoteTitle('')
+          setNoteContent('')
+          closeAdd()
+        }
+      } else {
+        if (!urlInput.trim()) return
+        const res = await fetch(`${API}/saves`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: urlInput.trim(), notes: notesInput.trim() }),
+        })
+        if (res.status === 409) {
+          setError('Already saved!')
+        } else if (!res.ok) {
+          const err = await res.json()
+          setError(err.detail || 'Something went wrong.')
+        } else {
+          const newSave = await res.json()
+          setSaves(prev => [newSave, ...prev])
+          fetchTypes()
+          setUrlInput('')
+          setNotesInput('')
+          closeAdd()
+        }
       }
     } catch {
       setError('Cannot reach backend.')
@@ -257,12 +346,51 @@ export default function App() {
               >
                 Select
               </button>
-              <button
-                onClick={openAdd}
-                className="shrink-0 bg-violet-600 hover:bg-violet-700 text-white text-sm font-medium px-4 py-2 rounded-full transition"
-              >
-                + Save
-              </button>
+              <div className="relative shrink-0">
+                <button
+                  onClick={() => setShowSaveMenu(p => !p)}
+                  className="w-8 h-8 flex items-center justify-center rounded-full bg-violet-600 hover:bg-violet-700 text-white text-lg font-light transition"
+                >
+                  +
+                </button>
+
+                {showSaveMenu && (
+                  <>
+                    {/* invisible backdrop */}
+                    <div className="fixed inset-0 z-40" onClick={() => setShowSaveMenu(false)} />
+                    {/* floating menu */}
+                    <div className="absolute right-0 top-10 z-50 w-56 rounded-2xl overflow-hidden shadow-2xl"
+                         style={{ background: '#1c1c1e' }}>
+                      <button
+                        onClick={() => { setShowSaveMenu(false); setShowNoteEditor(true) }}
+                        className="w-full flex items-center justify-between px-4 py-3.5 text-sm text-white hover:bg-white/5 transition"
+                      >
+                        <span className="font-medium">Note</span>
+                        <span className="w-8 h-8 rounded-xl flex items-center justify-center text-base"
+                              style={{ background: '#2c2c2e' }}>✎</span>
+                      </button>
+                      <div style={{ height: 1, background: '#2c2c2e', margin: '0 16px' }} />
+                      <button
+                        onClick={() => { setShowSaveMenu(false); setSaveTab('link'); setError(''); setShowAddModal(true) }}
+                        className="w-full flex items-center justify-between px-4 py-3.5 text-sm text-white hover:bg-white/5 transition"
+                      >
+                        <span className="font-medium">Link</span>
+                        <span className="w-8 h-8 rounded-xl flex items-center justify-center text-base"
+                              style={{ background: '#2c2c2e' }}>⌁</span>
+                      </button>
+                      <div style={{ height: 1, background: '#2c2c2e', margin: '0 16px' }} />
+                      <button
+                        onClick={() => { setShowSaveMenu(false); uploadInputRef.current?.click() }}
+                        className="w-full flex items-center justify-between px-4 py-3.5 text-sm text-white hover:bg-white/5 transition"
+                      >
+                        <span className="font-medium">Upload</span>
+                        <span className="w-8 h-8 rounded-xl flex items-center justify-center text-base"
+                              style={{ background: '#2c2c2e' }}>↑</span>
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
             </>
           )}
         </div>
@@ -309,23 +437,49 @@ export default function App() {
             onClick={e => e.stopPropagation()}
             className="bg-white rounded-3xl w-full max-w-md p-6 flex flex-col gap-4 shadow-2xl"
           >
-            <h2 className="text-base font-semibold text-neutral-900">Save something</h2>
-            <input
-              type="url"
-              value={urlInput}
-              onChange={e => setUrlInput(e.target.value)}
-              placeholder="https://…"
-              required
-              autoFocus
-              className="border border-neutral-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-violet-400"
-            />
-            <textarea
-              value={notesInput}
-              onChange={e => setNotesInput(e.target.value)}
-              placeholder="Notes (optional)"
-              rows={2}
-              className="border border-neutral-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-violet-400 resize-none"
-            />
+            <h2 className="text-base font-semibold text-neutral-900">
+              {saveTab === 'note' ? 'New note' : 'Save a link'}
+            </h2>
+
+            {saveTab === 'link' ? (
+              <>
+                <input
+                  type="url"
+                  value={urlInput}
+                  onChange={e => setUrlInput(e.target.value)}
+                  placeholder="https://…"
+                  required
+                  autoFocus
+                  className="border border-neutral-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-violet-400"
+                />
+                <textarea
+                  value={notesInput}
+                  onChange={e => setNotesInput(e.target.value)}
+                  placeholder="Notes (optional)"
+                  rows={2}
+                  className="border border-neutral-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-violet-400 resize-none"
+                />
+              </>
+            ) : (
+              <>
+                <input
+                  type="text"
+                  value={noteTitle}
+                  onChange={e => setNoteTitle(e.target.value)}
+                  placeholder="Title (optional)"
+                  autoFocus
+                  className="border border-neutral-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-violet-400"
+                />
+                <textarea
+                  value={noteContent}
+                  onChange={e => setNoteContent(e.target.value)}
+                  placeholder="Write your thought…"
+                  rows={5}
+                  className="border border-neutral-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-violet-400 resize-none"
+                />
+              </>
+            )}
+
             {error && <p className="text-red-500 text-xs">{error}</p>}
             <div className="flex justify-end gap-2">
               <button type="button" onClick={closeAdd} className="px-4 py-2 text-sm rounded-full text-neutral-500 hover:bg-neutral-100 transition">
@@ -396,6 +550,62 @@ export default function App() {
       )}
 
       {showUniverse && <Universe onClose={() => setShowUniverse(false)} />}
+
+      {/* Full-screen note editor */}
+      {showNoteEditor && (
+        <div className="fixed inset-0 z-50 flex flex-col" style={{ background: '#111' }}>
+          {/* top bar */}
+          <div className="flex items-center justify-between px-8 py-4 shrink-0">
+            <button
+              onClick={closeNoteEditor}
+              className="text-sm font-medium transition"
+              style={{ color: '#888' }}
+              onMouseEnter={e => e.currentTarget.style.color = '#fff'}
+              onMouseLeave={e => e.currentTarget.style.color = '#888'}
+            >
+              ← Back
+            </button>
+            <button
+              onClick={handleSaveNote}
+              disabled={adding}
+              className="px-5 py-1.5 rounded-full text-sm font-medium transition disabled:opacity-40"
+              style={{ background: '#7c3aed', color: '#fff' }}
+            >
+              {adding ? 'Saving…' : 'Save'}
+            </button>
+          </div>
+
+          {/* editor area */}
+          <div className="flex-1 overflow-y-auto px-8 pb-16 flex flex-col gap-4" style={{ maxWidth: 800, width: '100%', margin: '0 auto' }}>
+            <input
+              type="text"
+              value={noteTitle}
+              onChange={e => setNoteTitle(e.target.value)}
+              placeholder="Untitled note"
+              autoFocus
+              className="w-full bg-transparent outline-none font-semibold"
+              style={{ fontSize: '2rem', lineHeight: 1.2, color: '#fff', caretColor: '#7c3aed' }}
+            />
+            <textarea
+              value={noteContent}
+              onChange={e => setNoteContent(e.target.value)}
+              placeholder="Write something or press '/' for options"
+              className="w-full flex-1 bg-transparent outline-none resize-none text-base leading-relaxed"
+              style={{ color: '#bbb', caretColor: '#7c3aed', minHeight: '60vh', fontSize: '1rem' }}
+            />
+            {error && <p className="text-red-400 text-sm">{error}</p>}
+          </div>
+        </div>
+      )}
+
+      {/* hidden file upload input */}
+      <input
+        type="file"
+        accept=".png,.jpg,.jpeg"
+        ref={uploadInputRef}
+        onChange={handleUpload}
+        className="hidden"
+      />
     </div>
   )
 }
