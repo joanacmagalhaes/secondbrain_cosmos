@@ -73,14 +73,8 @@ Ollama runs automatically in the background after installation. You can verify i
 ```bash
 cd backend
 python -m venv venv
-```
-
-Install dependencies — **do not activate the venv first**, just call pip directly (avoids PowerShell execution policy issues on Windows):
-
-```bash
 # Windows
 venv\Scripts\pip install -r requirements.txt
-
 # macOS / Linux
 venv/bin/pip install -r requirements.txt
 ```
@@ -244,6 +238,27 @@ venv\Scripts\pip install -r requirements.txt   # Windows
 Once the venv exists, restart the desktop app. To confirm the backend is starting correctly, run `SecondMind-debug.bat` from a terminal — you'll see `[backend]` log lines if it launched successfully, or an error message if it failed.
 
 > **Why does browser mode work but desktop mode doesn't?** In browser mode (Option B) you start uvicorn manually, so you see the error immediately if something is wrong. In desktop mode the backend is a hidden child process — failures are invisible unless you check the debug output.
+
+### Windows: "Electron failed to install correctly" error
+
+This happens on newer versions of Node.js (v18+, especially v22+). Node's built-in zip extraction is incompatible with the package Electron uses to unpack its binary — the download succeeds but the executable is never written to disk.
+
+**Fix:** open a PowerShell window in the secondmind folder and run:
+
+```powershell
+.\fix-electron.ps1
+```
+
+This script finds the already-downloaded zip in the Electron cache and extracts it correctly using PowerShell's own `Expand-Archive`. It then writes the two metadata files (`path.txt` and `dist/version`) that Electron needs to confirm a successful install.
+
+After it reports success, try running the app again.
+
+> If PowerShell blocks the script with an "execution policy" error, run this first:
+> ```powershell
+> Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+> ```
+
+---
 
 ### The app loads but saves don't appear / backend errors
 
