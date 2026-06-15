@@ -516,6 +516,31 @@ def generate_clusters(conn) -> list:
         else:
             no_topic.append(i)
 
+    # Merge clusters whose members share any topic in common — catches
+    # cases where similar saves get slightly different primary topics
+    # (e.g. "Gaming" vs "Video Games" vs "Cooperative Games")
+    changed = True
+    while changed:
+        changed = False
+        names = list(topic_groups.keys())
+        for a in range(len(names)):
+            for b in range(a + 1, len(names)):
+                na, nb = names[a], names[b]
+                if na not in topic_groups or nb not in topic_groups:
+                    continue
+                topics_a = {t for idx in topic_groups[na] for t in topics_list[idx]}
+                topics_b = {t for idx in topic_groups[nb] for t in topics_list[idx]}
+                if topics_a & topics_b:
+                    # Merge smaller into larger, keep the larger's name
+                    if len(topic_groups[na]) >= len(topic_groups[nb]):
+                        topic_groups[na].extend(topic_groups.pop(nb))
+                    else:
+                        topic_groups[nb].extend(topic_groups.pop(na))
+                    changed = True
+                    break
+            if changed:
+                break
+
     # Only saves with truly missing topics fall back to embedding distance
     if no_topic and topic_groups:
         def _centroid(idxs):

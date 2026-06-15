@@ -120,13 +120,14 @@ export default function Universe({ onClose }) {
     const root = svg.append('g')
     svg.call(d3.zoom().scaleExtent([0.15, 6]).on('zoom', e => root.attr('transform', e.transform)))
 
-    // Circle size scales with number of saves — small clusters stay small
-    const unitR = Math.max(H * 0.08, 55)
+    // Circle size scales linearly with saves — clear visual difference between 1 and 3+ saves
+    const minR    = Math.max(H * 0.065, 50)
+    const perSave = Math.max(H * 0.030, 22)
     const clusterData = clusters.map(c => ({
       ...c,
       cx: c.layoutPos[0] * W,
       cy: c.layoutPos[1] * H,
-      r: unitR * Math.sqrt(c.saves.length),
+      r: minR + (c.saves.length - 1) * perSave,
     }))
 
     const glowLayer    = root.append('g')
@@ -194,6 +195,8 @@ export default function Universe({ onClose }) {
         .attr('stroke', c.palette.dot)
         .attr('stroke-width', 1.2)
         .attr('opacity', 0.38)
+        .attr('x1', d => d[0].x).attr('y1', d => d[0].y)
+        .attr('x2', d => d[1].x).attr('y2', d => d[1].y)
 
       // Show only this cluster's label
       labelEls.forEach((el, i) => el.attr('opacity', i === idx ? 1 : 0))
@@ -296,6 +299,8 @@ export default function Universe({ onClose }) {
             .attr('stroke', d.cluster.palette.dot)
             .attr('stroke-width', 1.2)
             .attr('opacity', 0.55)
+            .attr('x1', d.x).attr('y1', d.y)
+            .attr('x2', n => n.x).attr('y2', n => n.y)
 
           nodeEls.filter(n => similarIds.has(n.save.id))
             .attr('r', n => n.r + 2).attr('opacity', 0.95)
